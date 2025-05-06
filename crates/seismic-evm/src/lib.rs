@@ -8,24 +8,27 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use alloy_evm::eth::EthEvmContext;
+use alloy_evm::EthEvm;
 use alloy_evm::IntoTxEnv;
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory};
-use alloy_evm::EthEvm;
+use alloy_primitives::address;
 use alloy_primitives::{Address, Bytes};
 use core::fmt::Debug;
 use revm::MainBuilder;
 use revm::MainContext;
 use revm::{
-    context::{BlockEnv, TxEnv, Cfg},
+    context::{BlockEnv, Cfg, TxEnv},
     context_interface::result::{EVMError, HaltReason, ResultAndState},
     context_interface::ContextTr,
     handler::EthPrecompiles,
     handler::PrecompileProvider,
     inspector::NoOpInspector,
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
+    precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
     primitives::hardfork::SpecId,
     Context, Inspector,
 };
+use std::sync::OnceLock;
 
 /// Seismic EVM implementation.
 ///
@@ -185,17 +188,22 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
     fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
-        <EthPrecompiles as PrecompileProvider<CTX>>::set_spec(&mut self.precompiles, spec);
+        let spec_id = spec.clone().into();
+        if spec_id == SpecId::PRAGUE {
+            self.precompiles = EthPrecompiles { precompiles: prague_custom() }
+        } else {
+            PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
+        }
     }
 
     fn run(
         &mut self,
-        _context: &mut CTX,
+        context: &mut CTX,
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, String> {
-        self.precompiles.run(_context, address, bytes, gas_limit)
+    ) -> Result<Option<Self::Output>, String> {
+        self.precompiles.run(context, address, bytes, gas_limit)
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
@@ -205,4 +213,21 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     fn contains(&self, address: &Address) -> bool {
         self.precompiles.contains(address)
     }
+}
+
+/// Returns precompiles for Fjor spec.
+pub fn prague_custom() -> &'static Precompiles {
+    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let mut precompiles = Precompiles::prague().clone();
+        // Custom precompile.
+        precompiles.extend([(
+            address!("0x0000000000000000000000000000000000000999"),
+            |_, _| -> PrecompileResult {
+                PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
+            } as PrecompileFn,
+        )
+            .into()]);
+        precompiles
+    })
 }
