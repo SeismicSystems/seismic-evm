@@ -35,6 +35,9 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.dependencies]
+seismic-enclave = "0.1.0"
+seismic-revm = { version = "1.0.0", default-features =  false }
+
 alloy-evm = { version = "0.20.1", path = "crates/evm", default-features = false }
 alloy-op-evm = { version = "0.20.1", path = "crates/op-evm", default-features = false }
 
@@ -42,7 +45,7 @@ alloy-op-evm = { version = "0.20.1", path = "crates/op-evm", default-features = 
 alloy-eip2124 = { version = "0.2", default-features = false }
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-eips = { version = "1.0", default-features = false }
-alloy-consensus = { version = "1.0.0", default-features = false }
+alloy-consensus = { version = "1.1.0", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false }
 alloy-sol-types = { version = "1.0.0", default-features = false }
 alloy-hardforks = { version = "0.3" }
@@ -51,6 +54,9 @@ alloy-rpc-types-eth = { version = "1.0.0", default-features = false }
 # op-alloy
 alloy-op-hardforks = { version = "0.3" }
 op-alloy-consensus = { version = "0.19", default-features = false }
+
+# seismic-alloy
+seismic-alloy-consensus = { version = "0.0.1", default-features = false }
 
 # revm
 revm = { version = "29.0.0", default-features = false }
@@ -63,6 +69,25 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.0", default-features = false }
 serde_json = "1"
 
-#[patch.crates-io]
-#revm = { git = "https://github.com/bluealloy/revm", rev = "11b16259" }
-#op-revm = { git = "https://github.com/bluealloy/revm", rev = "11b16259" }
+[patch.crates-io]
+# enclave
+seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "ac5e28dac1ee8ec0e3922b010e6da072d6e784aa" }
+
+# alloy-core
+alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+alloy-json-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+alloy-sol-macro-expander = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+alloy-sol-macro-input = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
+
+# alloy
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "ebc3628c9e384b1db5a41044dd32756b3e79aacb" }
+
+# revm
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+
+alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy.git", tag = "v1.1.0" }
