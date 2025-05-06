@@ -54,6 +54,7 @@ op-alloy-consensus = { version = "0.11", default-features = false }
 # revm
 revm = { version = "20.0.0-alpha.7", default-features = false }
 op-revm = { version = "1.0.0-alpha.6", default-features = false }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "6bd6b5f"}
 
 # misc
 auto_impl = "1"
