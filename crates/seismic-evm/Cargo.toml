@@ -1,0 +1,41 @@
+[package]
+name = "alloy-seismic-evm"
+description = "Seismic EVM implementation"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-evm = { workspace = true, features = ["op"] }
+
+alloy-eips.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+
+alloy-op-hardforks.workspace = true
+op-alloy-consensus.workspace = true
+
+revm.workspace = true
+op-revm.workspace = true
+
+auto_impl.workspace = true
+
+[features]
+default = ["std"]
+std = [
+	"alloy-primitives/std",
+	"revm/std",
+	"alloy-evm/std",
+	"op-revm/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"op-alloy-consensus/std"
+]
