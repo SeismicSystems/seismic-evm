@@ -7,8 +7,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
 use alloy_evm::eth::EthEvmContext;
 use alloy_evm::IntoTxEnv;
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory};
@@ -18,7 +16,7 @@ use core::fmt::Debug;
 use revm::MainBuilder;
 use revm::MainContext;
 use revm::{
-    context::{BlockEnv, TxEnv},
+    context::{BlockEnv, TxEnv, Cfg},
     context_interface::result::{EVMError, HaltReason, ResultAndState},
     context_interface::ContextTr,
     handler::EthPrecompiles,
@@ -28,9 +26,6 @@ use revm::{
     primitives::hardfork::SpecId,
     Context, Inspector,
 };
-
-pub mod block;
-pub use block::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory};
 
 /// Seismic EVM implementation.
 ///
@@ -60,6 +55,7 @@ pub struct SeismicEvm<DB: Database, I, PRECOMPILE = EthPrecompiles> {
 // }
 
 impl<DB: Database, I, PRECOMPILE> SeismicEvm<DB, I, PRECOMPILE> {
+    /// creates a new [`SeismicEvm`].
     pub fn new(inner: EthEvm<DB, I, PRECOMPILE>) -> Self {
         Self { inner }
     }
@@ -172,7 +168,7 @@ impl EvmFactory for SeismicEvmFactory {
 }
 
 /// A custom precompile that contains static precompiles.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CustomPrecompiles {
     pub precompiles: EthPrecompiles,
 }
@@ -188,8 +184,8 @@ impl CustomPrecompiles {
 impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <CTX::Cfg as revm::context::Cfg>::Spec) {
-        self.precompiles.set_spec(spec)
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
+        <EthPrecompiles as PrecompileProvider<CTX>>::set_spec(&mut self.precompiles, spec);
     }
 
     fn run(
