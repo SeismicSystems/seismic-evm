@@ -27,7 +27,7 @@ use revm::{
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
     precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
     primitives::hardfork::SpecId,
-    Context, Inspector,
+    Context, Inspector, InspectEvm,
 };
 use std::sync::OnceLock;
 use seismic_revm::{SeismicContext, SeismicSpecId};
@@ -35,6 +35,8 @@ use revm::ExecuteEvm;
 use seismic_revm::SeismicHaltReason;
 use seismic_revm::transaction::abstraction::SeismicTransaction;
 use seismic_revm::SeismicBuilder;
+use alloy_primitives::U256;
+use alloy_primitives::TxKind;
 
 /// Seismic EVM implementation.
 ///
@@ -91,7 +93,7 @@ impl<DB: Database, I> DerefMut for SeismicEvm<DB, I> {
 impl<DB, I> Evm for SeismicEvm<DB, I>
 where
     DB: Database,
-    I: Inspector<EthEvmContext<DB>>,
+    I: Inspector<SeismicContext<DB>>,
     // PRECOMPILE: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
 {
     type DB = DB;
