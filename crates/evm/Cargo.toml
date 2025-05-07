@@ -33,7 +33,7 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 serde_json.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "seismic"]
 std = [
 	"alloy-primitives/std",
 	"revm/std",
