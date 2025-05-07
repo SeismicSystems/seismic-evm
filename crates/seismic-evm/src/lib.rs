@@ -7,7 +7,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use alloy_evm::eth::EthEvmContext;
 use alloy_evm::IntoTxEnv;
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::address;
