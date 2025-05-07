@@ -14,7 +14,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alloy-evm = { workspace = true, features = ["op"] }
+alloy-evm = { workspace = true, features = ["op", "seismic"] }
 
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -36,6 +36,7 @@ std = [
 	"revm/std",
 	"alloy-evm/std",
 	"op-revm/std",
+	"seismic-revm/std",
 	"alloy-consensus/std",
 	"alloy-eips/std",
 	"op-alloy-consensus/std"

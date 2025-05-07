@@ -21,13 +21,16 @@ alloy-eips.workspace = true
 alloy-hardforks.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 
+seismic-revm = { workspace = true }
 revm.workspace = true
 op-revm = { workspace = true, optional = true }
 op-alloy-consensus = { workspace = true, optional = true }
+seismic-alloy-consensus.workspace = true
 
 auto_impl.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
+
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
@@ -40,6 +43,7 @@ secp256k1 = [
     "alloy-consensus/secp256k1",
 ]
 std = [
+	"seismic-revm/std",
     "alloy-primitives/std",
     "revm/std",
     "alloy-consensus/std",
@@ -54,3 +58,4 @@ std = [
 op = ["op-revm", "op-alloy-consensus"]
 overrides = ["dep:alloy-rpc-types-eth"]
 call-util = ["overrides"]
+timestamp-in-seconds = ["revm/timestamp-in-seconds", "seismic-revm/timestamp-in-seconds"]
