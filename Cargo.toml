@@ -68,3 +68,4 @@ serde_json = "1"
 revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "52b7908e"}
 op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "52b7908e"}
 seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "52b7908e"}
+alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "4aa721c" }
