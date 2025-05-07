@@ -8,7 +8,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use alloy_evm::eth::EthEvmContext;
-use alloy_evm::EthEvm;
 use alloy_evm::IntoTxEnv;
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::address;
@@ -18,11 +17,9 @@ use core::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
-use revm::MainBuilder;
-use revm::MainContext;
 use revm::{
     context::{BlockEnv, Cfg, TxEnv},
-    context_interface::result::{EVMError, HaltReason, ResultAndState},
+    context_interface::result::{EVMError, ResultAndState},
     context_interface::ContextTr,
     handler::EthPrecompiles,
     handler::PrecompileProvider,
@@ -34,7 +31,6 @@ use revm::{
 };
 use std::sync::OnceLock;
 use seismic_revm::{SeismicContext, SeismicSpecId};
-use revm::handler::EvmTr;
 use revm::ExecuteEvm;
 use seismic_revm::SeismicHaltReason;
 use seismic_revm::transaction::abstraction::SeismicTransaction;
