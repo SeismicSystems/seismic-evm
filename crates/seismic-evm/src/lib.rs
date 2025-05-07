@@ -214,12 +214,11 @@ where
 pub struct SeismicEvmFactory;
 
 impl EvmFactory for SeismicEvmFactory {
-    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        SeismicEvm<DB, I>;
+    type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
     type Tx = SeismicTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = SeismicHaltReason;
-    type Context<DB: Database> = EthEvmContext<DB>;
+    type Context<DB: Database> = SeismicContext<DB>;
     type Spec = SeismicSpecId;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv<SeismicSpecId>) -> Self::Evm<DB, NoOpInspector> {
