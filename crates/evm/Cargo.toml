@@ -22,6 +22,7 @@ alloy-hardforks.workspace = true
 
 revm.workspace = true
 op-revm = { workspace = true, optional = true }
+seismic-revm = { workspace = true, optional = true }
 
 auto_impl.workspace = true
 derive_more.workspace = true
@@ -41,6 +42,8 @@ std = [
 	"alloy-sol-types/std",
 	"derive_more/std",
 	"op-revm?/std",
+	"seismic-revm?/std",
 	"thiserror/std"
 ]
 op = ["op-revm"]
+seismic = ["seismic-revm"]
