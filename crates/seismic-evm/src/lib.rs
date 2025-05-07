@@ -38,6 +38,7 @@ use revm::handler::EvmTr;
 use revm::ExecuteEvm;
 use seismic_revm::SeismicHaltReason;
 use seismic_revm::transaction::abstraction::SeismicTransaction;
+use seismic_revm::SeismicBuilder;
 
 /// Seismic EVM implementation.
 ///
@@ -168,7 +169,7 @@ impl EvmFactory for SeismicEvmFactory {
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_op_with_inspector(NoOpInspector {}),
+                .build_seismic_with_inspector(NoOpInspector {}),
             inspect: false,
         }
     }
@@ -176,7 +177,7 @@ impl EvmFactory for SeismicEvmFactory {
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
         &self,
         db: DB,
-        input: EvmEnv,
+        input: EvmEnv<SeismicSpecId>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
         SeismicEvm {
@@ -184,7 +185,7 @@ impl EvmFactory for SeismicEvmFactory {
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_op_with_inspector(inspector),
+                .build_seismic_with_inspector(inspector),
             inspect: true,
         }
     }
