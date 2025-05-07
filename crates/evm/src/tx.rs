@@ -23,7 +23,6 @@ impl<T: revm::context::Transaction> IntoTxEnv<Self> for op_revm::OpTransaction<T
     }
 }
 
-// #[cfg(feature = "seismic")]
 impl<T: revm::context::Transaction> IntoTxEnv<Self> for seismic_revm::SeismicTransaction<T> {
     fn into_tx_env(self) -> Self {
         self

@@ -22,7 +22,7 @@ alloy-hardforks.workspace = true
 
 revm.workspace = true
 op-revm = { workspace = true, optional = true }
-seismic-revm = { workspace = true, optional = true }
+seismic-revm = { workspace = true }
 
 auto_impl.workspace = true
 derive_more.workspace = true
@@ -33,7 +33,7 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 serde_json.workspace = true
 
 [features]
-default = ["std", "seismic"]
+default = ["std"]
 std = [
 	"alloy-primitives/std",
 	"revm/std",
@@ -42,8 +42,8 @@ std = [
 	"alloy-sol-types/std",
 	"derive_more/std",
 	"op-revm?/std",
-	"seismic-revm?/std",
+	"seismic-revm/std",
 	"thiserror/std"
 ]
 op = ["op-revm"]
-seismic = ["seismic-revm"]
+# seismic = ["seismic-revm"]
