@@ -29,6 +29,8 @@ seismic-revm = {workspace = true, features = ["secp256k1"]}
 
 auto_impl.workspace = true
 
+seismic-enclave.workspace = true
+
 [features]
 default = ["std"]
 std = [

@@ -63,8 +63,10 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.0", default-features = false }
 serde_json = "1"
 
+seismic-enclave = "0.1.0"
 
 [patch.crates-io]
 revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
 op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
 seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
+seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "3a56cce" }
