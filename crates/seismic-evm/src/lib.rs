@@ -7,31 +7,20 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
-use alloy_primitives::{address, Address, Bytes, TxKind, B256, U256};
-use core::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use alloy_evm::{Database, Evm, EvmEnv, IntoTxEnv, EvmFactory};
+use alloy_primitives::{Address, Bytes, TxKind, U256};
+use core::ops::{Deref, DerefMut};
 use revm::{
-    context::{BlockEnv, Cfg, TxEnv},
-    context_interface::{
+    context::{result::InvalidTransaction, BlockEnv, TxEnv}, context_interface::{
         result::{EVMError, ResultAndState},
         ContextTr,
-    },
-    handler::{EthPrecompiles, PrecompileProvider},
-    inspector::NoOpInspector,
-    interpreter::{interpreter::EthInterpreter, InterpreterResult},
-    precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
-    primitives::hardfork::SpecId,
-    Context, ExecuteEvm, InspectEvm, Inspector,
+    }, handler::PrecompileProvider, inspector::NoOpInspector, interpreter::{interpreter::EthInterpreter, InterpreterResult}, Context, ExecuteEvm, InspectEvm, Inspector
 };
 use seismic_enclave::EnclaveClient;
 use seismic_revm::{
-    transaction::abstraction::{RngMode, SeismicTransaction},
-    DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
+    instructions::instruction_provider::SeismicInstructions, precompiles::SeismicPrecompiles, transaction::abstraction::{RngMode, SeismicTransaction}, DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 /// Seismic EVM implementation.
 ///
@@ -39,13 +28,12 @@ use std::sync::{Arc, OnceLock};
 /// support. [`Inspector`] support is configurable at runtime because it's part of the underlying
 /// [`SeismicEvm`](seismic_revm::SeismicEvm) type.
 #[allow(missing_debug_implementations)]
-pub struct SeismicEvm<DB: Database, I> {
-    inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I>,
-    enclave_client: Arc<EnclaveClient>,
+pub struct SeismicEvm<DB: Database, I, P = SeismicPrecompiles<SeismicContext<DB>>> {
+    inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I, SeismicInstructions<EthInterpreter, SeismicContext<DB>>, P>,
     inspect: bool,
 }
 
-impl<DB: Database + revm::database_interface::Database, I> SeismicEvm<DB, I> {
+impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &SeismicContext<DB> {
         &self.inner.0.data.ctx
@@ -62,18 +50,18 @@ impl<DB: Database + revm::database_interface::Database, I> SeismicEvm<DB, I> {
     }
 }
 
-impl<DB: Database, I> SeismicEvm<DB, I> {
+
+impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     /// creates a new [`SeismicEvm`].
     pub fn new(
-        inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I>,
+        inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I, SeismicInstructions<EthInterpreter, SeismicContext<DB>>, P>,
         inspect: bool,
-        enclave_client: Arc<EnclaveClient>,
     ) -> Self {
-        Self { inner, inspect, enclave_client }
+        Self { inner, inspect }
     }
 }
 
-impl<DB: Database, I> Deref for SeismicEvm<DB, I> {
+impl<DB: Database, I, P> Deref for SeismicEvm<DB, I, P> {
     type Target = SeismicContext<DB>;
 
     #[inline]
@@ -82,18 +70,20 @@ impl<DB: Database, I> Deref for SeismicEvm<DB, I> {
     }
 }
 
-impl<DB: Database, I> DerefMut for SeismicEvm<DB, I> {
+
+impl<DB: Database, I, P> DerefMut for SeismicEvm<DB, I, P> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.ctx_mut()
     }
 }
 
-impl<DB, I> Evm for SeismicEvm<DB, I>
+
+impl<DB, I, P> Evm for SeismicEvm<DB, I, P>
 where
     DB: Database,
     I: Inspector<SeismicContext<DB>>,
-    // PRECOMPILE: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
+    P: PrecompileProvider<SeismicContext<DB>, Output = InterpreterResult>,
 {
     type DB = DB;
     type Tx = SeismicTransaction<TxEnv>;
@@ -155,7 +145,7 @@ where
                 tx_type: 0,
                 authorization_list: Default::default(),
             },
-            tx_hash: B256::ZERO,
+            tx_hash: Default::default(),
             rng_mode: RngMode::Execution,
         };
 
@@ -207,19 +197,28 @@ where
     }
 }
 
-/// Custom EVM configuration.
-#[derive(Debug, Clone, Default)]
+/// Factory producing [`SeismicEvm`]s.
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
+// ADding the enclave client here, given the enclave related information gets feeded at EVM
+// creation in the chain object. Wiring still TODO
 pub struct SeismicEvmFactory {
     enclave_client: Arc<EnclaveClient>,
 }
 
+impl SeismicEvmFactory {
+    pub fn new(enclave_client: Arc<EnclaveClient>) -> Self {
+        Self { enclave_client }
+    }
+}
+
 impl EvmFactory for SeismicEvmFactory {
     type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
-    type Tx = SeismicTransaction<TxEnv>;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-    type HaltReason = SeismicHaltReason;
     type Context<DB: Database> = SeismicContext<DB>;
+    type Tx = SeismicTransaction<TxEnv>;
+    type Error<DBError: core::error::Error + Send + Sync + 'static> =
+        EVMError<DBError, InvalidTransaction>;
+    type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
 
     fn create_evm<DB: Database>(
@@ -234,11 +233,10 @@ impl EvmFactory for SeismicEvmFactory {
                 .with_cfg(input.cfg_env)
                 .build_seismic_with_inspector(NoOpInspector {}),
             inspect: false,
-            enclave_client: self.enclave_client.clone(),
         }
     }
 
-    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
+    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
@@ -251,69 +249,6 @@ impl EvmFactory for SeismicEvmFactory {
                 .with_cfg(input.cfg_env)
                 .build_seismic_with_inspector(inspector),
             inspect: true,
-            enclave_client: self.enclave_client.clone(),
         }
     }
 }
-
-// /// A custom precompile that contains static precompiles.
-// #[derive(Clone, Debug)]
-// pub struct CustomPrecompiles {
-//     pub precompiles: EthPrecompiles,
-// }
-
-// impl CustomPrecompiles {
-//     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
-//     /// wrapper that can be used inside Evm.
-//     fn new() -> Self {
-//         Self { precompiles: EthPrecompiles::default() }
-//     }
-// }
-
-// impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
-//     type Output = InterpreterResult;
-
-//     fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
-//         let spec_id = spec.clone().into();
-//         if spec_id == SpecId::PRAGUE {
-//             self.precompiles = EthPrecompiles { precompiles: prague_custom() }
-//         } else {
-//             PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
-//         }
-//     }
-
-//     fn run(
-//         &mut self,
-//         context: &mut CTX,
-//         address: &Address,
-//         bytes: &Bytes,
-//         gas_limit: u64,
-//     ) -> Result<Option<Self::Output>, String> {
-//         self.precompiles.run(context, address, bytes, gas_limit)
-//     }
-
-//     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-//         self.precompiles.warm_addresses()
-//     }
-
-//     fn contains(&self, address: &Address) -> bool {
-//         self.precompiles.contains(address)
-//     }
-// }
-
-// /// Returns precompiles for Fjor spec.
-// pub fn prague_custom() -> &'static Precompiles {
-//     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
-//     INSTANCE.get_or_init(|| {
-//         let mut precompiles = Precompiles::prague().clone();
-//         // Custom precompile.
-//         precompiles.extend([(
-//             address!("0x0000000000000000000000000000000000000999"),
-//             |_, _| -> PrecompileResult {
-//                 PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
-//             } as PrecompileFn,
-//         )
-//             .into()]);
-//         precompiles
-//     })
-// }
