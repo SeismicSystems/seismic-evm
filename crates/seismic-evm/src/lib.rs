@@ -111,7 +111,8 @@ where
         &mut self,
         tx: impl IntoTxEnv<Self::Tx>,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.transact_raw(tx.into_tx_env())
+        // construct the txenv your way here 
+        self.transact_raw(tx.into_tx_env()) // before converted with fill_tx_env
     }
 
     fn transact_system_call(
@@ -203,10 +204,13 @@ where
 // ADding the enclave client here, given the enclave related information gets feeded at EVM
 // creation in the chain object. Wiring still TODO
 pub struct SeismicEvmFactory {
+    /// a client to communicate with the enclave server
+    /// used primarily for retrieving keys for encryption and rng
     enclave_client: Arc<EnclaveClient>,
 }
 
 impl SeismicEvmFactory {
+    /// Creates a new [`SeismicEvmFactory`].
     pub fn new(enclave_client: Arc<EnclaveClient>) -> Self {
         Self { enclave_client }
     }

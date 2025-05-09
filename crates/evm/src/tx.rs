@@ -25,6 +25,7 @@ impl<T: revm::context::Transaction> IntoTxEnv<Self> for op_revm::OpTransaction<T
 
 impl<T: revm::context::Transaction> IntoTxEnv<Self> for seismic_revm::SeismicTransaction<T> {
     fn into_tx_env(self) -> Self {
+        // involves decryption now?
         self
     }
 }
