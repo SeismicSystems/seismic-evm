@@ -3,6 +3,7 @@
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::Address;
 use revm::context::TxEnv;
+use seismic_revm::transaction::abstraction::SeismicTransaction;
 
 /// Trait marking types that can be converted into a transaction environment.
 pub trait IntoTxEnv<TxEnv> {
@@ -23,7 +24,7 @@ impl<T: revm::context::Transaction> IntoTxEnv<Self> for op_revm::OpTransaction<T
     }
 }
 
-impl<T: revm::context::Transaction> IntoTxEnv<Self> for seismic_revm::SeismicTransaction<T> {
+impl<T: revm::context::Transaction> IntoTxEnv<Self> for SeismicTransaction<T> {
     fn into_tx_env(self) -> Self {
         self
     }
