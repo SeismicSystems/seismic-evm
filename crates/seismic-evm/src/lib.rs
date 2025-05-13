@@ -48,6 +48,11 @@ impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     pub fn inspector_mut(&mut self) -> &mut I {
         &mut self.inner.0.data.inspector
     }
+
+    /// returns an immutable reference to the EVM precompiles.
+    pub fn precompiles(&self) -> &P {
+        &self.inner.0.precompiles
+    }
 }
 
 
