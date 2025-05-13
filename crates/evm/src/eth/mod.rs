@@ -22,6 +22,7 @@ pub use block::*;
 
 pub mod dao_fork;
 pub mod eip6110;
+pub mod protocol_params;
 pub mod receipt_builder;
 pub mod spec;
 
@@ -258,13 +259,13 @@ where
 pub struct EthEvmFactory;
 
 impl EvmFactory for EthEvmFactory {
-    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>>> = EthEvm<DB, I, Self::Precompiles>;
+    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>>> = EthEvm<DB, I, Self::Precompiles<DB>>;
     type Context<DB: Database> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Spec = SpecId;
-    type Precompiles = PrecompilesMap;
+    type Precompiles<DB: Database> = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         EthEvmBuilder::new(db, input).build()

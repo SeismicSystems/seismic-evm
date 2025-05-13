@@ -15,20 +15,10 @@ workspace = true
 
 [dependencies]
 alloy-evm = { workspace = true, features = ["op"] }
-
-alloy-eips.workspace = true
-alloy-consensus.workspace = true
 alloy-primitives.workspace = true
-
-alloy-op-hardforks.workspace = true
-op-alloy-consensus.workspace = true
-
 revm.workspace = true
-op-revm.workspace = true
+
 seismic-revm = {workspace = true, features = ["secp256k1"]}
-
-auto_impl.workspace = true
-
 seismic-enclave.workspace = true
 
 [features]
@@ -37,9 +27,5 @@ std = [
 	"alloy-primitives/std",
 	"revm/std",
 	"alloy-evm/std",
-	"op-revm/std",
 	"seismic-revm/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"op-alloy-consensus/std"
 ]
