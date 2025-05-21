@@ -276,14 +276,8 @@ dependencies = [
 name = "alloy-seismic-evm"
 version = "0.1.0-alpha.3"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
  "alloy-evm",
- "alloy-op-hardforks",
  "alloy-primitives",
- "auto_impl",
- "op-alloy-consensus",
- "op-revm",
  "revm",
  "seismic-enclave 0.1.0 (git+https://github.com/SeismicSystems/enclave.git?rev=3a56cce)",
  "seismic-revm",
