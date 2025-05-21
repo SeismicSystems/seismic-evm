@@ -205,13 +205,16 @@ where
 /// Factory producing [`SeismicEvm`]s.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-// ADding the enclave client here, given the enclave related information gets feeded at EVM
-// creation in the chain object. Wiring still TODO
+// Adding the enclave client here,
+// given the enclave related information gets fed at EVM creation in the chain object.
+// Wiring still TODO
 pub struct SeismicEvmFactory {
+    #[allow(dead_code)]
     enclave_client: Arc<EnclaveClient>,
 }
 
 impl SeismicEvmFactory {
+    /// Creates a new [`SeismicEvmFactory`].
     pub fn new(enclave_client: Arc<EnclaveClient>) -> Self {
         Self { enclave_client }
     }
