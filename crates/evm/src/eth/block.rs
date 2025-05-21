@@ -129,6 +129,8 @@ where
 
         let gas_used = result.gas_used();
 
+        println!("ETH gas_used: {}", gas_used);
+
         // append gas used
         self.gas_used += gas_used;
 
