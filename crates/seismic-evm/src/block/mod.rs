@@ -13,8 +13,7 @@
 //     eth::receipt_builder::ReceiptBuilderCtx,
 //     Database, Evm, EvmFactory, FromRecoveredTx,
 // };
-// use alloy_seismic_hardforks::{SeismicChainHardforks, SeismicHardforks};
-// use alloy_hardforks::ChainHardforks;
+// use crate::hardfork::{SeismicChainHardforks, SeismicHardforks};
 // use alloy_primitives::{Bytes, B256};
 // // pub use receipt_builder::SeismicAlloyReceiptBuilder;
 // // use receipt_builder::SeismicReceiptBuilder;

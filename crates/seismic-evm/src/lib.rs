@@ -23,6 +23,7 @@ use seismic_revm::{
 use std::sync::Arc;
 
 mod block;
+pub mod hardfork;
 
 /// Seismic EVM implementation.
 ///
