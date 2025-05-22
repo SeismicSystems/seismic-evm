@@ -95,6 +95,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-dyn-abi"
+version = "0.8.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb8e762aefd39a397ff485bc86df673465c4ad3ec8819cc60833a8a3ba5cdc87"
+dependencies = [
+ "alloy-json-abi",
+ "alloy-primitives",
+ "alloy-sol-type-parser",
+ "alloy-sol-types",
+ "const-hex",
+ "derive_more 2.0.1",
+ "itoa",
+ "serde",
+ "serde_json",
+ "winnow",
+]
+
+[[package]]
 name = "alloy-eip2124"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -283,6 +301,7 @@ dependencies = [
  "alloy-primitives",
  "auto_impl",
  "revm",
+ "seismic-alloy-consensus",
  "seismic-enclave 0.1.0 (git+https://github.com/SeismicSystems/enclave.git?rev=3a56cce)",
  "seismic-revm",
 ]
@@ -1173,6 +1192,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -3661,6 +3681,25 @@ checksum = "49db231d56a190491cb4aeda9527f1ad45345af50b0851622a7adb8c03b01c32"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "seismic-alloy-consensus"
+version = "0.0.1"
+source = "git+https://github.com/SeismicSystems/seismic-op-alloy.git?rev=7edb230b#7edb230b86531bf8a27d4b244d72c6280e4ca2a7"
+dependencies = [
+ "alloy-consensus",
+ "alloy-dyn-abi",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "anyhow",
+ "derive_more 1.0.0",
+ "jsonrpsee",
+ "k256",
+ "seismic-enclave 0.1.0 (git+https://github.com/SeismicSystems/enclave.git?rev=3a56cce)",
+ "serde_json",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

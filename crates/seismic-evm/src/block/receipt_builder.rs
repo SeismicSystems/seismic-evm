@@ -1,3 +1,7 @@
+// use alloy_consensus::Eip658Value;
+// use alloy_evm::{eth::receipt_builder::ReceiptBuilderCtx, Evm};
+// use seismic_alloy_consensus::{SeismicReceiptEnvelope, SeismicTxEnvelope, SeismicTxType};
+
 // /// Builds an [`SeismicTransactionReceipt`].
 // ///
 // /// Like [`EthReceiptBuilder`], but with Seismic types
