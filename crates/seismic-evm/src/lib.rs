@@ -22,6 +22,8 @@ use seismic_revm::{
 };
 use std::sync::Arc;
 
+mod block;
+
 /// Seismic EVM implementation.
 ///
 /// This is a wrapper type around the `revm` evm with optional [`Inspector`] (tracing)
