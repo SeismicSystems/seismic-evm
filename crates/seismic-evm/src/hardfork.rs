@@ -6,11 +6,11 @@ use alloy_hardforks::EthereumHardforks;
 use alloy_hardforks::ForkCondition;
 
 hardfork!(
-    /// The name of an optimism hardfork.
+    /// The name of an seismic hardfork.
     ///
     /// When building a list of hardforks for a chain, it's still expected to mix with
     /// [`EthereumHardfork`].
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    // #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     SeismicHardfork {
         /// Mercury
         Mercury,
@@ -24,7 +24,7 @@ impl SeismicHardfork {
     }
 }
 
-/// Extends [`EthereumHardforks`] with optimism helper methods.
+/// Extends [`EthereumHardforks`] with seismic helper methods.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait SeismicHardforks: EthereumHardforks {
     /// Retrieves [`ForkCondition`] by an [`SeismicHardfork`]. If `fork` is not present, returns
