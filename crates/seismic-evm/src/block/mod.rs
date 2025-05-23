@@ -18,22 +18,25 @@ use alloy_evm::{
 use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
-
 pub mod receipt_builder;
+use seismic_enclave::client::rpc::SyncEnclaveApiClient;
+// use seismic_enclave::client::{self, MockEnclaveClient};
+// use seismic_alloy_consensus::SeismicTypedTransaction;
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
 #[derive(Debug)]
-pub struct SeismicBlockExecutor<'a, Evm, Spec, R>
+pub struct SeismicBlockExecutor<'a, Evm, Spec, R, C>
 where
     R: ReceiptBuilder,
     R::Receipt: std::fmt::Debug,
 {
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
+    enclave_client: C,
 }
 
-impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
+impl<'a, E, Spec, R, C> SeismicBlockExecutor<'a, E, Spec, R, C>
 where
     E: Evm,
     R: ReceiptBuilder,
@@ -41,17 +44,24 @@ where
     Spec: SeismicHardforks + Clone,
 {
     /// Creates a new [`SeismicBlockExecutor`].
-    pub fn new(evm: E, ctx: SeismicBlockExecutionCtx<'a>, spec: Spec, receipt_builder: R) -> Self {
-        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder) }
+    pub fn new(
+        evm: E,
+        ctx: SeismicBlockExecutionCtx<'a>,
+        spec: Spec,
+        receipt_builder: R,
+        enclave_client: C,
+    ) -> Self {
+        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), enclave_client }
     }
 }
 
-impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
+impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
 where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    C: SyncEnclaveApiClient,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -66,6 +76,35 @@ where
         tx: Recovered<&Self::Transaction>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
+        // // apply decryption
+        // println!("seismic_block_builder: execute_transaction_with_result_closure: tx: {:?}", tx);
+        // let mut decrypted_tx = tx.clone();
+        // let inner_tx = decrypted_tx.inner_mut();
+        // let typed_tx: SeismicTypedTransaction = tx.inner().transaction().clone();
+
+        // // If there is encrypted calldata decrypt the transaction
+        // // and replace the call data with the plaintext for inner_tx
+        // match typed_tx {
+        //     SeismicTypedTransaction::Seismic(tx_seismic) => {
+        //         let ciphertext = tx_seismic.input().clone();
+        //         let seismic_elements = tx_seismic.seismic_elements.clone();
+
+        //         let decrypted_data = seismic_elements
+        //             .server_decrypt(&self.enclave_client, &ciphertext)
+        //             .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
+
+        //         let mut new_tx = tx_seismic.clone();
+        //         new_tx.input = decrypted_data;
+
+        //         *inner_tx = SeismicTransactionSigned::new(
+        //             SeismicTypedTransaction::Seismic(new_tx),
+        //             *inner_tx.signature(),
+        //             *inner_tx.tx_hash(),
+        //         );
+        //     }
+        //     _ => (),
+        // };
+
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
 
@@ -85,6 +124,7 @@ where
 /// Ethereum block executor factory.
 #[derive(Debug, Clone, Default, Copy)]
 pub struct SeismicBlockExecutorFactory<
+    C,
     R = SeismicAlloyReceiptBuilder,
     Spec = SeismicChainHardforks,
     EvmFactory = SeismicEvmFactory,
@@ -95,13 +135,20 @@ pub struct SeismicBlockExecutorFactory<
     spec: Spec,
     /// EVM factory.
     evm_factory: EvmFactory,
+    /// Enclave client.
+    enclave_client: C,
 }
 
-impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
+impl<C, R, Spec, EvmFactory> SeismicBlockExecutorFactory<C, R, Spec, EvmFactory> {
     /// Creates a new [`SeismicBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`SeismicReceiptBuilder`].
-    pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
-        Self { receipt_builder, spec, evm_factory }
+    pub const fn new(
+        receipt_builder: R,
+        spec: Spec,
+        evm_factory: EvmFactory,
+        enclave_client: C,
+    ) -> Self {
+        Self { receipt_builder, spec, evm_factory, enclave_client }
     }
 
     /// Exposes the receipt builder.
@@ -120,11 +167,12 @@ impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
     }
 }
 
-impl<R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<R, Spec, EvmF>
+impl<C, R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<C, R, Spec, EvmF>
 where
     R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
     Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction>>,
+    C: SyncEnclaveApiClient + Clone,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -145,6 +193,7 @@ where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
     {
-        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
+        let enclave_client = self.enclave_client.clone();
+        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, enclave_client)
     }
 }
