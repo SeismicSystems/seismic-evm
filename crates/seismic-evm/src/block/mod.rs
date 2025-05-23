@@ -26,6 +26,7 @@ use seismic_enclave::client::rpc::SyncEnclaveApiClient;
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
+/// Wraps a [`EthBlockExecutor`] and decrypts the transaction input before executing
 #[derive(Debug)]
 pub struct SeismicBlockExecutor<'a, Evm, Spec, R, C>
 where
