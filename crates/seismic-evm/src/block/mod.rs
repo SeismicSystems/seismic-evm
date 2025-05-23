@@ -119,7 +119,7 @@ pub struct SeismicBlockExecutorFactory<
     CB,
     R = SeismicAlloyReceiptBuilder,
     Spec = SeismicChainHardforks,
-    EvmFactory = SeismicEvmFactory,
+    EvmFactory = SeismicEvmFactory<CB>,
 > {
     /// Receipt builder.
     receipt_builder: R,
@@ -195,5 +195,186 @@ where
     {
         let enclave_client = self.client_builder.clone().build();
         SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, enclave_client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_consensus::SignableTransaction;
+    use alloy_evm::EvmEnv;
+    use alloy_primitives::{
+        aliases::U96, keccak256, Bytes, PrimitiveSignature, TxKind, B256, U256,
+    };
+    use k256::ecdsa::{SigningKey, VerifyingKey};
+    use revm::{
+        context::{BlockEnv, CfgEnv},
+        database::{InMemoryDB, StateBuilder},
+    };
+    use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
+    use seismic_enclave::{
+        nonce::Nonce, rand, tx_io::IoEncryptionRequest, MockEnclaveClientBuilder, PublicKey,
+        Secp256k1, SecretKey,
+    };
+    use seismic_revm::SeismicSpecId;
+
+    use alloy_primitives::Address;
+    use seismic_alloy_consensus::SeismicTxEnvelope;
+
+    use super::*;
+
+    fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> PrimitiveSignature {
+        let _signature = signing_key
+            .clone()
+            .sign_prehash_recoverable(tx.signature_hash().as_slice())
+            .expect("Failed to sign");
+
+        let recoverid = _signature.1;
+        let _signature = _signature.0;
+
+        let signature = PrimitiveSignature::new(
+            U256::from_be_slice(_signature.r().to_bytes().as_slice()),
+            U256::from_be_slice(_signature.s().to_bytes().as_slice()),
+            recoverid.is_y_odd(),
+        );
+
+        signature
+    }
+
+    fn public_key_to_address(public: VerifyingKey) -> Address {
+        let hash = keccak256(&public.to_encoded_point(/* compress = */ false).as_bytes()[1..]);
+        Address::from_slice(&hash[12..])
+    }
+
+    #[derive(Clone)]
+    struct SetupTest<'a> {
+        signer: Address,
+        signing_key: SigningKey,
+        executor_factory: SeismicBlockExecutorFactory<MockEnclaveClientBuilder>,
+        ctx: SeismicBlockExecutionCtx<'a>,
+        enclave_builder: MockEnclaveClientBuilder,
+        encryption_pubkey: PublicKey,
+        encryption_nonce: Nonce,
+        evm_factory: SeismicEvmFactory<MockEnclaveClientBuilder>,
+    }
+
+    fn setup_test<'a>(state: &mut State<InMemoryDB>) -> SetupTest<'a> {
+        let rng = &mut rand::thread_rng();
+        let signing_key = SigningKey::random(rng);
+        let pubkey = signing_key.verifying_key();
+        let signer = public_key_to_address(*pubkey);
+
+        let sk = SecretKey::new(rng);
+        let secp = Secp256k1::new();
+        let encryption_pubkey = PublicKey::from_secret_key(&secp, &sk);
+
+        let enclave_builder = MockEnclaveClientBuilder::new();
+        let evm_factory = SeismicEvmFactory::new(enclave_builder.clone());
+
+        state.increment_balances(vec![(signer, 1000000000000000000)]).unwrap();
+        let executor_factory = SeismicBlockExecutorFactory::new(
+            SeismicAlloyReceiptBuilder::default(),
+            SeismicChainHardforks::seismic_mainnet(),
+            evm_factory.clone(),
+            enclave_builder.clone(),
+        );
+
+        let ctx = SeismicBlockExecutionCtx {
+            withdrawals: None,
+            parent_hash: B256::ZERO,
+            parent_beacon_block_root: None,
+            ommers: &[],
+        };
+        SetupTest {
+            encryption_pubkey,
+            signer,
+            signing_key,
+            executor_factory,
+            ctx,
+            enclave_builder,
+            encryption_nonce: Nonce::new_rand(),
+            evm_factory,
+        }
+    }
+
+    fn get_tx_envelope<'a>(setup: &SetupTest<'a>, tx_seismic: TxSeismic) -> SeismicTxEnvelope {
+        let sig = sign_seismic_tx(&tx_seismic, &setup.signing_key);
+        let tx_signed = SignableTransaction::into_signed(tx_seismic, sig);
+        let tx_envelope = SeismicTxEnvelope::Seismic(tx_signed);
+        return tx_envelope;
+    }
+
+    fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
+        let ciphertext = setup
+            .enclave_builder
+            .clone()
+            .build()
+            .encrypt(IoEncryptionRequest {
+                key: setup.encryption_pubkey,
+                data: plaintext.as_bytes().to_vec(),
+                nonce: setup.encryption_nonce.clone(),
+            })
+            .unwrap()
+            .encrypted_data;
+        TxSeismic {
+            chain_id: 5124,
+            nonce: 0,
+            gas_price: 1000000000,
+            gas_limit: 1000000,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::from(0),
+            input: Bytes::from(ciphertext),
+            seismic_elements: TxSeismicElements {
+                encryption_pubkey: setup.encryption_pubkey,
+                encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+                message_version: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn test_transaction_decryption_in_executor() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let tx_seismic = sample_seismic_tx(&setup, plaintext);
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+        executor.execute_transaction(recovered).unwrap();
+    }
+
+    #[test]
+    fn test_incorrect_encryption() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let mut tx_seismic = sample_seismic_tx(&setup, plaintext);
+
+        let rng = &mut rand::thread_rng();
+        let wrong_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &SecretKey::new(rng));
+        tx_seismic.seismic_elements.encryption_pubkey = wrong_pubkey;
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+
+        if let Ok(result) = executor.execute_transaction(recovered) {
+            panic!("should have failed: {:?}", result);
+        }
     }
 }

@@ -183,6 +183,7 @@ dependencies = [
  "derive_more 2.0.1",
  "op-revm",
  "revm",
+ "seismic-alloy-consensus",
  "seismic-revm",
  "serde_json",
  "thiserror 2.0.12",
@@ -298,6 +299,7 @@ dependencies = [
  "alloy-hardforks",
  "alloy-primitives",
  "auto_impl",
+ "k256",
  "revm",
  "seismic-alloy-consensus",
  "seismic-enclave 0.1.0 (git+https://github.com/SeismicSystems/enclave.git?rev=e1c341b)",
@@ -3995,9 +3997,9 @@ dependencies = [
 
 [[package]]
 name = "signature"
-version = "2.2.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+checksum = "8fe458c98333f9c8152221191a77e2a44e8325d0193484af2e9421a53019e57d"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",

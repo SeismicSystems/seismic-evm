@@ -23,10 +23,12 @@ alloy-hardforks.workspace = true
 revm.workspace = true
 op-revm = { workspace = true, optional = true }
 seismic-revm = { workspace = true }
+seismic-alloy-consensus.workspace = true
 
 auto_impl.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
+
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
