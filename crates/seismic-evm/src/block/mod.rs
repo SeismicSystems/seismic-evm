@@ -22,6 +22,7 @@ pub mod receipt_builder;
 use alloy_evm::block::InternalBlockExecutionError;
 use seismic_alloy_consensus::InputDecryptionElements;
 use seismic_enclave::client::rpc::SyncEnclaveApiClient;
+use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -115,7 +116,7 @@ where
 /// Seismic block executor factory.
 #[derive(Debug, Clone, Default, Copy)]
 pub struct SeismicBlockExecutorFactory<
-    C,
+    CB,
     R = SeismicAlloyReceiptBuilder,
     Spec = SeismicChainHardforks,
     EvmFactory = SeismicEvmFactory,
@@ -127,19 +128,19 @@ pub struct SeismicBlockExecutorFactory<
     /// EVM factory.
     evm_factory: EvmFactory,
     /// Enclave client.
-    enclave_client: C,
+    client_builder: CB,
 }
 
-impl<C, R, Spec, EvmFactory> SeismicBlockExecutorFactory<C, R, Spec, EvmFactory> {
+impl<CB, R, Spec, EvmFactory> SeismicBlockExecutorFactory<CB, R, Spec, EvmFactory> {
     /// Creates a new [`SeismicBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`SeismicReceiptBuilder`].
     pub const fn new(
         receipt_builder: R,
         spec: Spec,
         evm_factory: EvmFactory,
-        enclave_client: C,
+        client_builder: CB,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory, enclave_client }
+        Self { receipt_builder, spec, evm_factory, client_builder }
     }
 
     /// Exposes the receipt builder.
@@ -156,9 +157,14 @@ impl<C, R, Spec, EvmFactory> SeismicBlockExecutorFactory<C, R, Spec, EvmFactory>
     pub const fn evm_factory(&self) -> &EvmFactory {
         &self.evm_factory
     }
+
+    /// Exposes the enclave client builder.
+    pub const fn client_builder(&self) -> &CB {
+        &self.client_builder
+    }
 }
 
-impl<C, R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<C, R, Spec, EvmF>
+impl<CB, R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<CB, R, Spec, EvmF>
 where
     R: ReceiptBuilder<
         Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
@@ -166,7 +172,7 @@ where
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction>>,
-    C: SyncEnclaveApiClient + Clone,
+    CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -187,7 +193,7 @@ where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
     {
-        let enclave_client = self.enclave_client.clone();
+        let enclave_client = self.client_builder.clone().build();
         SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, enclave_client)
     }
 }
