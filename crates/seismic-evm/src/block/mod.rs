@@ -24,8 +24,12 @@ pub mod receipt_builder;
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
-// #[derive(Debug)]
-pub struct SeismicBlockExecutor<'a, Evm, Spec, R: ReceiptBuilder> {
+#[derive(Debug)]
+pub struct SeismicBlockExecutor<'a, Evm, Spec, R>
+where
+    R: ReceiptBuilder,
+    R::Receipt: std::fmt::Debug,
+{
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
 }
 
@@ -33,6 +37,7 @@ impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
 where
     E: Evm,
     R: ReceiptBuilder,
+    R::Receipt: std::fmt::Debug,
     Spec: SeismicHardforks + Clone,
 {
     /// Creates a new [`SeismicBlockExecutor`].
@@ -64,9 +69,7 @@ where
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
 
-    fn finish(
-        self,
-    ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
+    fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
         self.inner.finish()
     }
 
