@@ -1,89 +1,59 @@
 //! Block executor for Seismic.
 
+use crate::hardfork::{SeismicChainHardforks, SeismicHardforks};
 use crate::SeismicEvmFactory;
-use alloy_consensus::{transaction::Recovered, Eip658Value, Header, Transaction, TxReceipt};
-use alloy_eips::{Encodable2718, Typed2718};
+use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt};
+use alloy_eips::Encodable2718;
+use alloy_evm::eth::receipt_builder::ReceiptBuilder;
+use alloy_evm::eth::spec::EthExecutorSpec;
+use alloy_evm::eth::EthBlockExecutionCtx;
+use alloy_evm::eth::EthBlockExecutor;
 use alloy_evm::{
     block::{
-        state_changes::{balance_increment_state, post_block_balance_increments},
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, BlockValidationError, OnStateHook, StateChangePostBlockSource,
-        StateChangeSource, SystemCaller,
+        BlockExecutorFor, OnStateHook,
     },
-    eth::receipt_builder::ReceiptBuilderCtx,
     Database, Evm, EvmFactory, FromRecoveredTx,
 };
-use crate::hardfork::{SeismicChainHardforks, SeismicHardforks};
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
-use receipt_builder::SeismicReceiptBuilder;
-use revm::{context::result::ResultAndState, database::State, DatabaseCommit, Inspector};
+use revm::{database::State, Inspector};
 
 pub mod receipt_builder;
 
-/// Context for OP block execution.
-#[derive(Debug, Clone)]
-pub struct SeismicBlockExecutionCtx {
-    /// Parent block hash.
-    pub parent_hash: B256,
-    /// Parent beacon block root.
-    pub parent_beacon_block_root: Option<B256>,
-    /// The block's extra data.
-    pub extra_data: Bytes,
-}
+type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
-#[derive(Debug)]
-pub struct SeismicBlockExecutor<Evm, R: SeismicReceiptBuilder, Spec> {
-    /// Spec.
-    spec: Spec,
-    /// Receipt builder.
-    receipt_builder: R,
-    /// Context for block execution.
-    ctx: SeismicBlockExecutionCtx,
-    /// The EVM used by executor.
-    evm: Evm,
-    /// Receipts of executed transactions.
-    receipts: Vec<R::Receipt>,
-    /// Total gas used by executed transactions.
-    gas_used: u64,
-    /// Utility to call system smart contracts.
-    system_caller: SystemCaller<Spec>,
+// #[derive(Debug)]
+pub struct SeismicBlockExecutor<'a, Evm, Spec, R: ReceiptBuilder> {
+    inner: EthBlockExecutor<'a, Evm, Spec, R>,
 }
 
-impl<E, R, Spec> SeismicBlockExecutor<E, R, Spec>
+impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
 where
     E: Evm,
-    R: SeismicReceiptBuilder,
+    R: ReceiptBuilder,
     Spec: SeismicHardforks + Clone,
 {
     /// Creates a new [`SeismicBlockExecutor`].
-    pub fn new(evm: E, ctx: SeismicBlockExecutionCtx, spec: Spec, receipt_builder: R) -> Self {
-        Self {
-            spec: spec.clone(),
-            receipt_builder,
-            evm,
-            ctx,
-            receipts: Vec::new(),
-            gas_used: 0,
-            system_caller: SystemCaller::new(spec),
-        }
+    pub fn new(evm: E, ctx: SeismicBlockExecutionCtx<'a>, spec: Spec, receipt_builder: R) -> Self {
+        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder) }
     }
 }
 
-impl<'db, DB, E, R, Spec> BlockExecutor for SeismicBlockExecutor<E, R, Spec>
+impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
-    R: SeismicReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
-    Spec: SeismicHardforks,
+    Spec: EthExecutorSpec,
+    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        unimplemented!()
+        self.inner.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_result_closure(
@@ -91,21 +61,21 @@ where
         tx: Recovered<&Self::Transaction>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        unimplemented!()
+        self.inner.execute_transaction_with_result_closure(tx, f)
     }
 
     fn finish(
-        mut self,
+        self,
     ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
-        unimplemented!()
+        self.inner.finish()
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-       unimplemented!()
+        self.inner.set_state_hook(hook)
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
-       unimplemented!()
+        self.inner.evm_mut()
     }
 }
 
@@ -149,13 +119,13 @@ impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
 
 impl<R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<R, Spec, EvmF>
 where
-    R: SeismicReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
-    Spec: SeismicHardforks,
+    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction>>,
     Self: 'static,
 {
     type EvmFactory = EvmF;
-    type ExecutionCtx<'a> = SeismicBlockExecutionCtx;
+    type ExecutionCtx<'a> = SeismicBlockExecutionCtx<'a>;
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
 
