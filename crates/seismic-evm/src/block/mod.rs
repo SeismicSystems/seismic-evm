@@ -112,7 +112,7 @@ where
     }
 }
 
-/// Ethereum block executor factory.
+/// Seismic block executor factory.
 #[derive(Debug, Clone, Default, Copy)]
 pub struct SeismicBlockExecutorFactory<
     C,
