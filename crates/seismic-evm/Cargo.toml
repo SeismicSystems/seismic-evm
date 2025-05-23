@@ -32,6 +32,9 @@ seismic-alloy-consensus = { workspace = true, features = ["std", "serde"] }
 # misc
 auto_impl.workspace = true
 
+[dev-dependencies]
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+
 [features]
 default = ["std"]
 std = [
