@@ -19,9 +19,9 @@ use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
 pub mod receipt_builder;
+use alloy_evm::block::InternalBlockExecutionError;
+use seismic_alloy_consensus::InputDecryptionElements;
 use seismic_enclave::client::rpc::SyncEnclaveApiClient;
-// use seismic_enclave::client::{self, MockEnclaveClient};
-// use seismic_alloy_consensus::SeismicTypedTransaction;
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -60,7 +60,10 @@ where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthExecutorSpec,
-    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    R: ReceiptBuilder<
+        Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
+        Receipt: TxReceipt<Log = Log>,
+    >,
     C: SyncEnclaveApiClient,
 {
     type Transaction = R::Transaction;
@@ -76,34 +79,21 @@ where
         tx: Recovered<&Self::Transaction>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        // // apply decryption
-        // println!("seismic_block_builder: execute_transaction_with_result_closure: tx: {:?}", tx);
-        // let mut decrypted_tx = tx.clone();
-        // let inner_tx = decrypted_tx.inner_mut();
-        // let typed_tx: SeismicTypedTransaction = tx.inner().transaction().clone();
+        println!("seismic_block_executor: execute_transaction_with_result_closure: tx: {:?}", tx);
+        let mut tx = tx.clone();
+        let inner_ptr = tx.inner_mut();
+        let mut inner_for_decryption = inner_ptr.clone();
 
-        // // If there is encrypted calldata decrypt the transaction
-        // // and replace the call data with the plaintext for inner_tx
-        // match typed_tx {
-        //     SeismicTypedTransaction::Seismic(tx_seismic) => {
-        //         let ciphertext = tx_seismic.input().clone();
-        //         let seismic_elements = tx_seismic.seismic_elements.clone();
-
-        //         let decrypted_data = seismic_elements
-        //             .server_decrypt(&self.enclave_client, &ciphertext)
-        //             .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-
-        //         let mut new_tx = tx_seismic.clone();
-        //         new_tx.input = decrypted_data;
-
-        //         *inner_tx = SeismicTransactionSigned::new(
-        //             SeismicTypedTransaction::Seismic(new_tx),
-        //             *inner_tx.signature(),
-        //             *inner_tx.tx_hash(),
-        //         );
-        //     }
-        //     _ => (),
-        // };
+        // case where there are seismic elements in the tx,
+        // meaning it is encrypted and we need to decrypt it
+        if let Ok(seismic_elements) = inner_for_decryption.get_decryption_elements() {
+            let ciphertext = inner_for_decryption.input().clone();
+            let decrypted_data = seismic_elements
+                .server_decrypt(&self.enclave_client, &ciphertext)
+                .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
+            inner_for_decryption.set_input(decrypted_data).unwrap();
+            *inner_ptr = &inner_for_decryption;
+        }
 
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
@@ -169,7 +159,10 @@ impl<C, R, Spec, EvmFactory> SeismicBlockExecutorFactory<C, R, Spec, EvmFactory>
 
 impl<C, R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<C, R, Spec, EvmF>
 where
-    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    R: ReceiptBuilder<
+        Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
+        Receipt: TxReceipt<Log = Log>,
+    >,
     Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction>>,
     C: SyncEnclaveApiClient + Clone,
