@@ -34,7 +34,7 @@ impl SeismicReceiptBuilder for SeismicAlloyReceiptBuilder {
         &self,
         ctx: ReceiptBuilderCtx<'a, Self::Transaction, E>,
     ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, Self::Transaction, E>> {
-        let receipt = alloy_consensus::Receipt {
+        let receipt_with_bloom = alloy_consensus::Receipt {
             status: Eip658Value::Eip658(ctx.result.is_success()),
             cumulative_gas_used: ctx.cumulative_gas_used,
             logs: ctx.result.into_logs(),
