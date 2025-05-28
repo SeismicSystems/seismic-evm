@@ -29,6 +29,9 @@ type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
 /// Wraps a [`EthBlockExecutor`] and decrypts the transaction input before executing
+/// 
+/// Note that only execute endpoints (e.g. eth_sendRawTransaction) will route through
+/// the block executor, not simulate endpoints (e.g. eth_call, eth_estimateGas).
 #[derive(Debug)]
 pub struct SeismicBlockExecutor<'a, Evm, Spec, R, C>
 where
@@ -82,7 +85,6 @@ where
         tx: Recovered<&Self::Transaction>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        println!("seismic_block_executor: execute_transaction_with_result_closure: tx: {:?}", tx);
         let mut tx = tx.clone();
         let inner_ptr = tx.inner_mut();
         let plaintext_copy = inner_ptr
@@ -196,7 +198,7 @@ mod tests {
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
     use alloy_primitives::{
-        aliases::U96, keccak256, Bytes, PrimitiveSignature, TxKind, B256, U256,
+        aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256,
     };
     use k256::ecdsa::{SigningKey, VerifyingKey};
     use revm::{
@@ -215,7 +217,7 @@ mod tests {
 
     use super::*;
 
-    fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> PrimitiveSignature {
+    fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
         let _signature = signing_key
             .clone()
             .sign_prehash_recoverable(tx.signature_hash().as_slice())
@@ -224,7 +226,7 @@ mod tests {
         let recoverid = _signature.1;
         let _signature = _signature.0;
 
-        let signature = PrimitiveSignature::new(
+        let signature = Signature::new(
             U256::from_be_slice(_signature.r().to_bytes().as_slice()),
             U256::from_be_slice(_signature.s().to_bytes().as_slice()),
             recoverid.is_y_odd(),
