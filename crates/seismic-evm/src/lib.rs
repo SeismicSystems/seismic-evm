@@ -7,18 +7,26 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use alloy_evm::{Database, Evm, EvmEnv, IntoTxEnv, EvmFactory};
+use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
 use revm::{
-    context::{result::InvalidTransaction, BlockEnv, TxEnv}, context_interface::{
+    context::{result::InvalidTransaction, BlockEnv, TxEnv},
+    context_interface::{
         result::{EVMError, ResultAndState},
         ContextTr,
-    }, handler::PrecompileProvider, inspector::NoOpInspector, interpreter::{interpreter::EthInterpreter, InterpreterResult}, Context, ExecuteEvm, InspectEvm, Inspector
+    },
+    handler::PrecompileProvider,
+    inspector::NoOpInspector,
+    interpreter::{interpreter::EthInterpreter, InterpreterResult},
+    Context, ExecuteEvm, InspectEvm, Inspector,
 };
 use seismic_enclave::EnclaveClient;
 use seismic_revm::{
-    instructions::instruction_provider::SeismicInstructions, precompiles::SeismicPrecompiles, transaction::abstraction::{RngMode, SeismicTransaction}, DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId
+    instructions::instruction_provider::SeismicInstructions,
+    precompiles::SeismicPrecompiles,
+    transaction::abstraction::{RngMode, SeismicTransaction},
+    DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
 
@@ -29,24 +37,29 @@ use std::sync::Arc;
 /// [`SeismicEvm`](seismic_revm::SeismicEvm) type.
 #[allow(missing_debug_implementations)]
 pub struct SeismicEvm<DB: Database, I, P = SeismicPrecompiles<SeismicContext<DB>>> {
-    inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I, SeismicInstructions<EthInterpreter, SeismicContext<DB>>, P>,
+    inner: seismic_revm::SeismicEvm<
+        SeismicContext<DB>,
+        I,
+        SeismicInstructions<EthInterpreter, SeismicContext<DB>>,
+        P,
+    >,
     inspect: bool,
 }
 
 impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &SeismicContext<DB> {
-        &self.inner.0.data.ctx
+        &self.inner.0.ctx
     }
 
     /// Provides a mutable reference to the EVM context.
     pub fn ctx_mut(&mut self) -> &mut SeismicContext<DB> {
-        &mut self.inner.0.data.ctx
+        &mut self.inner.0.ctx
     }
 
     /// Provides a mutable reference to the EVM inspector.
     pub fn inspector_mut(&mut self) -> &mut I {
-        &mut self.inner.0.data.inspector
+        &mut self.inner.0.inspector
     }
 
     /// returns an immutable reference to the EVM precompiles.
@@ -55,11 +68,15 @@ impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     }
 }
 
-
 impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     /// creates a new [`SeismicEvm`].
     pub fn new(
-        inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I, SeismicInstructions<EthInterpreter, SeismicContext<DB>>, P>,
+        inner: seismic_revm::SeismicEvm<
+            SeismicContext<DB>,
+            I,
+            SeismicInstructions<EthInterpreter, SeismicContext<DB>>,
+            P,
+        >,
         inspect: bool,
     ) -> Self {
         Self { inner, inspect }
@@ -75,14 +92,12 @@ impl<DB: Database, I, P> Deref for SeismicEvm<DB, I, P> {
     }
 }
 
-
 impl<DB: Database, I, P> DerefMut for SeismicEvm<DB, I, P> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.ctx_mut()
     }
 }
-
 
 impl<DB, I, P> Evm for SeismicEvm<DB, I, P>
 where
@@ -95,6 +110,12 @@ where
     type Error = EVMError<DB::Error>;
     type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
+    type Precompiles = P;
+    type Inspector = I;
+
+    fn chain_id(&self) -> u64 {
+        self.cfg.chain_id
+    }
 
     fn block(&self) -> &BlockEnv {
         self.inner.0.block()
@@ -192,13 +213,29 @@ where
     }
 
     fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
-        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.data.ctx;
+        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
     }
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
         self.inspect = enabled;
+    }
+
+    fn precompiles(&self) -> &Self::Precompiles {
+        &self.inner.0.precompiles
+    }
+
+    fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
+        &mut self.inner.0.precompiles
+    }
+
+    fn inspector(&self) -> &Self::Inspector {
+        &self.inner.0.inspector
+    }
+
+    fn inspector_mut(&mut self) -> &mut Self::Inspector {
+        &mut self.inner.0.inspector
     }
 }
 
@@ -228,6 +265,7 @@ impl EvmFactory for SeismicEvmFactory {
         EVMError<DBError, InvalidTransaction>;
     type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
+    type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
 
     fn create_evm<DB: Database>(
         &self,

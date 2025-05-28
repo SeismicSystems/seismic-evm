@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.3"
+version = "0.9.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Alloy Contributors"]
@@ -35,25 +35,27 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.dependencies]
-alloy-evm = { version = "0.1.0-alpha.3", path = "crates/evm", default-features = false }
-alloy-op-evm = { version = "0.1.0-alpha.3", path = "crates/op-evm", default-features = false }
+seismic-enclave = "0.1.0"
+
+alloy-evm = { version = "0.9.1", path = "crates/evm", default-features = false }
+alloy-op-evm = { version = "0.9.1", path = "crates/op-evm", default-features = false }
 
 # alloy
-alloy-eip2124 = { version = "0.1", default-features = false }
-alloy-chains = { version = "0.1.32", default-features = false }
-alloy-eips = { version = "0.12", default-features = false }
-alloy-consensus = { version = "0.12", default-features = false }
-alloy-primitives = { version = "0.8.22", default-features = false }
-alloy-sol-types = { version = "0.8.22", default-features = false }
-alloy-hardforks = { version = "0.1" }
+alloy-eip2124 = { version = "0.2", default-features = false }
+alloy-chains = { version = "0.2.0", default-features = false }
+alloy-eips = { version = "1.0", default-features = false }
+alloy-consensus = { version = "1.0.0", default-features = false }
+alloy-primitives = { version = "1.0.0", default-features = false }
+alloy-sol-types = { version = "1.0.0", default-features = false }
+alloy-hardforks = { version = "0.2" }
 
 # op-alloy
-alloy-op-hardforks = { version = "0.1" }
-op-alloy-consensus = { version = "0.11", default-features = false }
+alloy-op-hardforks = { version = "0.2" }
+op-alloy-consensus = { version = "0.16", default-features = false }
 
 # revm
-revm = { version = "20.0.0", default-features = false }
-op-revm = { version = "1.0.0", default-features = false }
+revm = { version = "23.1.0", default-features = false }
+op-revm = { version = "4.0.1", default-features = false }
 seismic-revm = { version = "1.0.0", default-features =  false }
 
 # misc
@@ -63,10 +65,12 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.0", default-features = false }
 serde_json = "1"
 
-seismic-enclave = "0.1.0"
-
 [patch.crates-io]
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "37871080"}
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "37871080"}
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "37871080"}
+
 seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "3a56cce" }
+
+alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "ab2208a" }
+alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "ab2208a" }
