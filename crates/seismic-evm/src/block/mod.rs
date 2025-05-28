@@ -84,18 +84,10 @@ where
         println!("seismic_block_executor: execute_transaction_with_result_closure: tx: {:?}", tx);
         let mut tx = tx.clone();
         let inner_ptr = tx.inner_mut();
-        let mut inner_for_decryption = inner_ptr.clone();
-
-        // case where there are seismic elements in the tx,
-        // meaning it is encrypted and we need to decrypt it
-        if let Ok(seismic_elements) = inner_for_decryption.get_decryption_elements() {
-            let ciphertext = inner_for_decryption.input().clone();
-            let decrypted_data = seismic_elements
-                .server_decrypt(&self.enclave_client, &ciphertext)
-                .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-            inner_for_decryption.set_input(decrypted_data).unwrap();
-            *inner_ptr = &inner_for_decryption;
-        }
+        let plaintext_copy = inner_ptr
+            .plaintext_copy(&self.enclave_client)
+            .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
+        *inner_ptr = &plaintext_copy;
 
         self.inner.execute_transaction_with_result_closure(tx, f)
     }

@@ -84,7 +84,7 @@ op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7
 seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7f398f8a"}
 
 # Seismic op-alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-op-alloy.git", rev = "1ca0324" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-op-alloy.git", rev = "e226848" }
 
 # enclave
 seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "e1c341b" }
