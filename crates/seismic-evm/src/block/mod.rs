@@ -1,17 +1,19 @@
 //! Block executor for Seismic.
 
-use crate::hardfork::{SeismicChainHardforks, SeismicHardforks};
-use crate::SeismicEvmFactory;
+use crate::{
+    hardfork::{SeismicChainHardforks, SeismicHardforks},
+    SeismicEvmFactory,
+};
 use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt};
 use alloy_eips::Encodable2718;
-use alloy_evm::eth::receipt_builder::ReceiptBuilder;
-use alloy_evm::eth::spec::EthExecutorSpec;
-use alloy_evm::eth::EthBlockExecutionCtx;
-use alloy_evm::eth::EthBlockExecutor;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, OnStateHook,
+    },
+    eth::{
+        receipt_builder::ReceiptBuilder, spec::EthExecutorSpec, EthBlockExecutionCtx,
+        EthBlockExecutor,
     },
     Database, Evm, EvmFactory, FromRecoveredTx,
 };
@@ -21,8 +23,7 @@ use revm::{database::State, Inspector};
 pub mod receipt_builder;
 use alloy_evm::block::InternalBlockExecutionError;
 use seismic_alloy_consensus::InputDecryptionElements;
-use seismic_enclave::client::rpc::SyncEnclaveApiClient;
-use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
+use seismic_enclave::{client::rpc::SyncEnclaveApiClient, rpc::SyncEnclaveApiClientBuilder};
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 

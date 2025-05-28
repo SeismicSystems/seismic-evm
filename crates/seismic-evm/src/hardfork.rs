@@ -1,10 +1,7 @@
 //! Seismic hardforks.
 
 use alloy_evm::eth::spec::EthExecutorSpec;
-use alloy_hardforks::hardfork;
-use alloy_hardforks::EthereumHardfork;
-use alloy_hardforks::EthereumHardforks;
-use alloy_hardforks::ForkCondition;
+use alloy_hardforks::{hardfork, EthereumHardfork, EthereumHardforks, ForkCondition};
 use alloy_primitives::Address;
 
 hardfork!(
