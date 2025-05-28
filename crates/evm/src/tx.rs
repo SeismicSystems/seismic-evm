@@ -61,8 +61,15 @@ impl<T, TxEnv: FromRecoveredTx<T>> IntoTxEnv<TxEnv> for &Recovered<T> {
     }
 }
 
+/// Necessary to run a test case that uses the SeismicAlloyReceiptBuilder for the SeismicEvm
+/// Necessary to include in this crate due to the orphan rule. 
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
+        // TODO: this should not be hardcoded
+        // Ok for now because we only use this for testing
+        let rng_mode = RngMode::Execution; 
+
+        let tx_hash = tx.tx_hash().clone();
         let base = match tx {
             SeismicTxEnvelope::Legacy(tx) => TxEnv {
                 tx_type: LEGACY_TX_TYPE_ID,
@@ -145,7 +152,7 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
                 authorization_list: vec![],
             },
         };
-        SeismicTransaction { base, tx_hash: tx.tx_hash().clone(), rng_mode: RngMode::Execution }
+        SeismicTransaction { base, tx_hash, rng_mode }
     }
 }
 
