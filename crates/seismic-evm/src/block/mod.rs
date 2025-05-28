@@ -1,17 +1,19 @@
 //! Block executor for Seismic.
 
-use crate::hardfork::{SeismicChainHardforks, SeismicHardforks};
-use crate::SeismicEvmFactory;
+use crate::{
+    hardfork::{SeismicChainHardforks, SeismicHardforks},
+    SeismicEvmFactory,
+};
 use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt};
 use alloy_eips::Encodable2718;
-use alloy_evm::eth::receipt_builder::ReceiptBuilder;
-use alloy_evm::eth::spec::EthExecutorSpec;
-use alloy_evm::eth::EthBlockExecutionCtx;
-use alloy_evm::eth::EthBlockExecutor;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, OnStateHook,
+    },
+    eth::{
+        receipt_builder::ReceiptBuilder, spec::EthExecutorSpec, EthBlockExecutionCtx,
+        EthBlockExecutor,
     },
     Database, Evm, EvmFactory, FromRecoveredTx,
 };
@@ -21,8 +23,7 @@ use revm::{database::State, Inspector};
 pub mod receipt_builder;
 use alloy_evm::block::InternalBlockExecutionError;
 use seismic_alloy_consensus::InputDecryptionElements;
-use seismic_enclave::client::rpc::SyncEnclaveApiClient;
-use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
+use seismic_enclave::{client::rpc::SyncEnclaveApiClient, rpc::SyncEnclaveApiClientBuilder};
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -63,7 +64,7 @@ where
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
-        Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
+        Transaction: Transaction + Encodable2718 + InputDecryptionElements,
         Receipt: TxReceipt<Log = Log>,
     >,
     C: SyncEnclaveApiClient,
@@ -84,18 +85,10 @@ where
         println!("seismic_block_executor: execute_transaction_with_result_closure: tx: {:?}", tx);
         let mut tx = tx.clone();
         let inner_ptr = tx.inner_mut();
-        let mut inner_for_decryption = inner_ptr.clone();
-
-        // case where there are seismic elements in the tx,
-        // meaning it is encrypted and we need to decrypt it
-        if let Ok(seismic_elements) = inner_for_decryption.get_decryption_elements() {
-            let ciphertext = inner_for_decryption.input().clone();
-            let decrypted_data = seismic_elements
-                .server_decrypt(&self.enclave_client, &ciphertext)
-                .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-            inner_for_decryption.set_input(decrypted_data).unwrap();
-            *inner_ptr = &inner_for_decryption;
-        }
+        let plaintext_copy = inner_ptr
+            .plaintext_copy(&self.enclave_client)
+            .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
+        *inner_ptr = &plaintext_copy;
 
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
@@ -351,7 +344,10 @@ mod tests {
         executor.execute_transaction(recovered).unwrap();
     }
 
+    // Expected behavior for now is panic as MockClient panics on bad encryption/decryption
+    // This test case may need to be updated if the MockClient is changed to return
     #[test]
+    #[should_panic]
     fn test_incorrect_encryption() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
@@ -373,8 +369,7 @@ mod tests {
         let tx_envelope = get_tx_envelope(&setup, tx_seismic);
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
-        if let Ok(result) = executor.execute_transaction(recovered) {
-            panic!("should have failed: {:?}", result);
-        }
+        let result = executor.execute_transaction(recovered);
+        assert!(result.is_err(), "expected transaction to fail, but got: {:?}", result);
     }
 }

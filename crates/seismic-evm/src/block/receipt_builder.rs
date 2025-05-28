@@ -1,9 +1,11 @@
 //! Custom receipt builder for Seismic.
 
 use alloy_consensus::Eip658Value;
-use alloy_evm::{eth::receipt_builder::ReceiptBuilderCtx, Evm};
+use alloy_evm::{
+    eth::receipt_builder::{ReceiptBuilder, ReceiptBuilderCtx},
+    Evm,
+};
 use seismic_alloy_consensus::{SeismicReceiptEnvelope, SeismicTxEnvelope, SeismicTxType};
-use alloy_evm::eth::receipt_builder::ReceiptBuilder;
 
 /// Receipt builder operating on op-alloy types.
 #[derive(Debug, Default, Clone, Copy)]
