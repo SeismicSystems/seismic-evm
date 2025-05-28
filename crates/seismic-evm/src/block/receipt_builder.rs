@@ -7,7 +7,7 @@ use alloy_evm::{
 };
 use seismic_alloy_consensus::{SeismicReceiptEnvelope, SeismicTxEnvelope, SeismicTxType};
 
-/// Receipt builder operating on seismic alloy types. Useful for testing, 
+/// Receipt builder operating on seismic alloy types. Useful for testing,
 /// but reth uses SeismicRethReceiptBuilder instead with T = SeismicTransactionSigned
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
