@@ -1,9 +1,8 @@
 //! Seismic hardforks.
 
-use alloy_hardforks::hardfork;
-use alloy_hardforks::EthereumHardfork;
-use alloy_hardforks::EthereumHardforks;
-use alloy_hardforks::ForkCondition;
+use alloy_evm::eth::spec::EthExecutorSpec;
+use alloy_hardforks::{hardfork, EthereumHardfork, EthereumHardforks, ForkCondition};
+use alloy_primitives::Address;
 
 hardfork!(
     /// The name of an seismic hardfork.
@@ -62,5 +61,17 @@ impl EthereumHardforks for SeismicChainHardforks {
         } else {
             ForkCondition::Never
         }
+    }
+}
+
+impl SeismicHardforks for SeismicChainHardforks {
+    fn seismic_fork_activation(&self, _fork: SeismicHardfork) -> ForkCondition {
+        ForkCondition::Block(0)
+    }
+}
+
+impl EthExecutorSpec for SeismicChainHardforks {
+    fn deposit_contract_address(&self) -> Option<Address> {
+        None
     }
 }

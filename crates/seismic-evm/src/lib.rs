@@ -7,18 +7,26 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use alloy_evm::{Database, Evm, EvmEnv, IntoTxEnv, EvmFactory};
+use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
 use revm::{
-    context::{result::InvalidTransaction, BlockEnv, TxEnv}, context_interface::{
+    context::{result::InvalidTransaction, BlockEnv, TxEnv},
+    context_interface::{
         result::{EVMError, ResultAndState},
         ContextTr,
-    }, handler::PrecompileProvider, inspector::NoOpInspector, interpreter::{interpreter::EthInterpreter, InterpreterResult}, Context, ExecuteEvm, InspectEvm, Inspector
+    },
+    handler::PrecompileProvider,
+    inspector::NoOpInspector,
+    interpreter::{interpreter::EthInterpreter, InterpreterResult},
+    Context, ExecuteEvm, InspectEvm, Inspector,
 };
-use seismic_enclave::EnclaveClient;
+use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
 use seismic_revm::{
-    instructions::instruction_provider::SeismicInstructions, precompiles::SeismicPrecompiles, transaction::abstraction::{RngMode, SeismicTransaction}, DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId
+    instructions::instruction_provider::SeismicInstructions,
+    precompiles::SeismicPrecompiles,
+    transaction::abstraction::{RngMode, SeismicTransaction},
+    DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
 
@@ -32,7 +40,12 @@ pub mod hardfork;
 /// [`SeismicEvm`](seismic_revm::SeismicEvm) type.
 #[allow(missing_debug_implementations)]
 pub struct SeismicEvm<DB: Database, I, P = SeismicPrecompiles<SeismicContext<DB>>> {
-    inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I, SeismicInstructions<EthInterpreter, SeismicContext<DB>>, P>,
+    inner: seismic_revm::SeismicEvm<
+        SeismicContext<DB>,
+        I,
+        SeismicInstructions<EthInterpreter, SeismicContext<DB>>,
+        P,
+    >,
     inspect: bool,
 }
 
@@ -58,11 +71,15 @@ impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     }
 }
 
-
 impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     /// creates a new [`SeismicEvm`].
     pub fn new(
-        inner: seismic_revm::SeismicEvm<SeismicContext<DB>, I, SeismicInstructions<EthInterpreter, SeismicContext<DB>>, P>,
+        inner: seismic_revm::SeismicEvm<
+            SeismicContext<DB>,
+            I,
+            SeismicInstructions<EthInterpreter, SeismicContext<DB>>,
+            P,
+        >,
         inspect: bool,
     ) -> Self {
         Self { inner, inspect }
@@ -78,14 +95,12 @@ impl<DB: Database, I, P> Deref for SeismicEvm<DB, I, P> {
     }
 }
 
-
 impl<DB: Database, I, P> DerefMut for SeismicEvm<DB, I, P> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.ctx_mut()
     }
 }
-
 
 impl<DB, I, P> Evm for SeismicEvm<DB, I, P>
 where
@@ -211,19 +226,20 @@ where
 // Adding the enclave client here,
 // given the enclave related information gets fed at EVM creation in the chain object.
 // Wiring still TODO
-pub struct SeismicEvmFactory {
+pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
     #[allow(dead_code)]
-    enclave_client: Arc<EnclaveClient>,
+    enclave_client: Arc<T::Client>,
 }
 
-impl SeismicEvmFactory {
+impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     /// Creates a new [`SeismicEvmFactory`].
-    pub fn new(enclave_client: Arc<EnclaveClient>) -> Self {
-        Self { enclave_client }
+    pub fn new(enclave_client_builder: T) -> Self {
+        let enclave_client = enclave_client_builder.build();
+        Self { enclave_client: Arc::new(enclave_client) }
     }
 }
 
-impl EvmFactory for SeismicEvmFactory {
+impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
     type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
     type Context<DB: Database> = SeismicContext<DB>;
     type Tx = SeismicTransaction<TxEnv>;
