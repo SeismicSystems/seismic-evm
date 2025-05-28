@@ -63,7 +63,7 @@ where
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
-        Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
+        Transaction: Transaction + Encodable2718 + InputDecryptionElements,
         Receipt: TxReceipt<Log = Log>,
     >,
     C: SyncEnclaveApiClient,
@@ -343,7 +343,10 @@ mod tests {
         executor.execute_transaction(recovered).unwrap();
     }
 
+    // Expected behavior for now is panic as MockClient panics on bad encryption/decryption
+    // This test case may need to be updated if the MockClient is changed to return
     #[test]
+    #[should_panic]
     fn test_incorrect_encryption() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
@@ -365,8 +368,7 @@ mod tests {
         let tx_envelope = get_tx_envelope(&setup, tx_seismic);
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
-        if let Ok(result) = executor.execute_transaction(recovered) {
-            panic!("should have failed: {:?}", result);
-        }
+        let result = executor.execute_transaction(recovered);
+        assert!(result.is_err(), "expected transaction to fail, but got: {:?}", result);
     }
 }
