@@ -3,9 +3,11 @@
 //! Works as an intermediary between SeismicTransactionSigned for consensus
 //! and SeismicTransaction<TxEnv> for seismic-revm
 
+use alloy_evm::FromRecoveredTx;
 use alloy_evm::IntoTxEnv;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use revm::context::{Transaction, TxEnv};
+use seismic_alloy_consensus::SeismicTxEnvelope;
 use seismic_alloy_consensus::{
     InputDecryptionElements, InputDecryptionElementsError, TxSeismicElements,
 };
@@ -129,6 +131,3 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicEvmSeismicEvmTx {
         Self { tx: inner_env, decryption_elements }
     }
 }
-
-use alloy_evm::FromRecoveredTx;
-use seismic_alloy_consensus::SeismicTxEnvelope;

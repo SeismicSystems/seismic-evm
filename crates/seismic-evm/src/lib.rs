@@ -7,7 +7,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use crate::tx::SeismicEvmSeismicEvmTx;
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
@@ -34,6 +33,7 @@ use std::sync::Arc;
 pub mod block;
 pub mod hardfork;
 pub mod tx;
+pub use tx::SeismicEvmSeismicEvmTx;
 
 /// Seismic EVM implementation.
 ///
