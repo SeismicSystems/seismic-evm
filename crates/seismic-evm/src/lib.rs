@@ -7,6 +7,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use crate::tx::SeismicEvmSeismicEvmTx;
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
@@ -29,7 +30,6 @@ use seismic_revm::{
     DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
-use crate::tx::SeismicEvmSeismicEvmTx;
 
 pub mod block;
 pub mod hardfork;
@@ -127,7 +127,7 @@ where
         // If the tx has decryption elements, decrypt it
         // to get things compiling, just covert with decrypt for now
         let tx = tx.tx.clone();
-        
+
         if self.inspect {
             self.inner.set_tx(tx);
             self.inner.inspect_replay()

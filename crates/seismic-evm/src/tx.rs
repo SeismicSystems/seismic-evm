@@ -1,14 +1,14 @@
 //! Transaction type for the seismic-evm crate
-//! 
+//!
 //! Works as an intermediary between SeismicTransactionSigned for consensus
 //! and SeismicTransaction<TxEnv> for seismic-revm
 
 use alloy_evm::IntoTxEnv;
-use alloy_primitives::B256;
-use alloy_primitives::{Address, Bytes, TxKind, U256};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use revm::context::{Transaction, TxEnv};
-use seismic_alloy_consensus::InputDecryptionElementsError;
-use seismic_alloy_consensus::{InputDecryptionElements, TxSeismicElements};
+use seismic_alloy_consensus::{
+    InputDecryptionElements, InputDecryptionElementsError, TxSeismicElements,
+};
 use seismic_revm::transaction::abstraction::SeismicTransaction;
 
 /// Tx type for the seismic-evm crate SeismicEvm
@@ -118,19 +118,15 @@ impl InputDecryptionElements for SeismicEvmSeismicEvmTx {
 
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicEvmSeismicEvmTx {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
-        
         let inner_env: SeismicTransaction<TxEnv> =
             SeismicTransaction::<TxEnv>::from_recovered_tx(&tx, sender);
-        
+
         let decryption_elements = match tx.get_decryption_elements() {
             Ok(elements) => Some(elements),
             Err(_) => None,
         };
-        
-        Self {
-            tx: inner_env,
-            decryption_elements: decryption_elements,
-        }
+
+        Self { tx: inner_env, decryption_elements }
     }
 }
 

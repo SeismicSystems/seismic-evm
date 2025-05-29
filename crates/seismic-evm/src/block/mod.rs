@@ -29,7 +29,7 @@ type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
 /// Wraps a [`EthBlockExecutor`] and decrypts the transaction input before executing
-/// 
+///
 /// Note that only execute endpoints (e.g. eth_sendRawTransaction) will route through
 /// the block executor, not simulate endpoints (e.g. eth_call, eth_estimateGas).
 #[derive(Debug)]
