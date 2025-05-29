@@ -29,9 +29,11 @@ use seismic_revm::{
     DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
+use crate::tx::SeismicEvmSeismicEvmTx;
 
 pub mod block;
 pub mod hardfork;
+pub mod tx;
 
 /// Seismic EVM implementation.
 ///
@@ -109,7 +111,7 @@ where
     P: PrecompileProvider<SeismicContext<DB>, Output = InterpreterResult>,
 {
     type DB = DB;
-    type Tx = SeismicTransaction<TxEnv>;
+    type Tx = SeismicEvmSeismicEvmTx;
     type Error = EVMError<DB::Error>;
     type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
@@ -122,6 +124,10 @@ where
         &mut self,
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        // If the tx has decryption elements, decrypt it
+        // to get things compiling, just covert with decrypt for now
+        let tx = tx.tx.clone();
+        
         if self.inspect {
             self.inner.set_tx(tx);
             self.inner.inspect_replay()
@@ -183,6 +189,7 @@ where
         // disable the nonce check
         core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
 
+        let tx = SeismicEvmSeismicEvmTx { tx, decryption_elements: None };
         let mut res = self.transact(tx);
 
         // swap back to the previous gas limit
@@ -242,7 +249,7 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
 impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
     type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
     type Context<DB: Database> = SeismicContext<DB>;
-    type Tx = SeismicTransaction<TxEnv>;
+    type Tx = SeismicEvmSeismicEvmTx;
     type Error<DBError: core::error::Error + Send + Sync + 'static> =
         EVMError<DBError, InvalidTransaction>;
     type HaltReason = SeismicHaltReason;
