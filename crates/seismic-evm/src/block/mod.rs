@@ -85,7 +85,6 @@ where
         tx: Recovered<&Self::Transaction>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        println!("seismic_block_executor: execute_transaction_with_result_closure: tx: {:?}", tx);
         let mut tx = tx.clone();
         let inner_ptr = tx.inner_mut();
         let plaintext_copy = inner_ptr
