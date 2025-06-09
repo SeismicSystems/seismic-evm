@@ -40,6 +40,12 @@ impl<T: revm::context::Transaction> IntoTxEnv<Self> for seismic_revm::SeismicTra
     }
 }
 
+impl IntoTxEnv<TxEnv> for seismic_revm::SeismicTransaction<TxEnv> {
+    fn into_tx_env(self) -> TxEnv {
+        self.base
+    }
+}
+
 /// Helper user-facing trait to allow implementing [`IntoTxEnv`] on instances of [`Recovered`].
 pub trait FromRecoveredTx<Tx> {
     /// Builds a `TxEnv` from a transaction and a sender address.
