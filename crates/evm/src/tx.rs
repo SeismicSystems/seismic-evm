@@ -5,7 +5,7 @@ use alloy_consensus::{
     TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
-    eip2718::{WithEncoded, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
+    eip2718::{WithEncoded, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID, EIP4844_TX_TYPE_ID},
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     eip2930::AccessList,
     Typed2718,
@@ -14,6 +14,7 @@ use alloy_primitives::{Address, Bytes, TxKind};
 use revm::{context::TxEnv, context_interface::either::Either};
 use seismic_alloy_consensus::{SeismicTxEnvelope, SEISMIC_TX_TYPE_ID};
 use seismic_revm::{transaction::abstraction::RngMode, SeismicTransaction};
+use alloy_consensus::Transaction;
 
 /// Trait marking types that can be converted into a transaction environment.
 pub trait IntoTxEnv<TxEnv> {
@@ -490,6 +491,22 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
                 value: tx.tx().value.into(),
                 data: tx.tx().input.clone(),
                 nonce: tx.tx().nonce,
+                chain_id: tx.tx().chain_id(),
+                access_list: AccessList::default(),
+                gas_priority_fee: None,
+                blob_hashes: vec![],
+                max_fee_per_blob_gas: 0,
+                authorization_list: vec![],
+            },
+            SeismicTxEnvelope::Eip4844(tx) => TxEnv {
+                tx_type: EIP4844_TX_TYPE_ID,
+                caller: sender,
+                gas_limit: tx.tx().gas_limit(),
+                gas_price: tx.tx().gas_price().unwrap_or_default(),
+                kind: tx.tx().kind(),
+                value: tx.tx().value().into(),
+                data: tx.tx().input().clone(),
+                nonce: tx.tx().nonce(),
                 chain_id: tx.tx().chain_id(),
                 access_list: AccessList::default(),
                 gas_priority_fee: None,
