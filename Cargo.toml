@@ -70,7 +70,7 @@ serde_json = "1"
 
 [patch.crates-io]
 # enclave
-seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "7e79591" }
+seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "3749534" }
 
 # alloy-core
 alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
