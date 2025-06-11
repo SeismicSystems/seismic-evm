@@ -198,7 +198,7 @@ mod tests {
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
     use alloy_primitives::{
-        aliases::U96, keccak256, Bytes, PrimitiveSignature, TxKind, B256, U256,
+        aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256,
     };
     use k256::ecdsa::{SigningKey, VerifyingKey};
     use revm::{
@@ -217,7 +217,7 @@ mod tests {
 
     use super::*;
 
-    fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> PrimitiveSignature {
+    fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
         let _signature = signing_key
             .clone()
             .sign_prehash_recoverable(tx.signature_hash().as_slice())
@@ -226,7 +226,7 @@ mod tests {
         let recoverid = _signature.1;
         let _signature = _signature.0;
 
-        let signature = PrimitiveSignature::new(
+        let signature = Signature::new(
             U256::from_be_slice(_signature.r().to_bytes().as_slice()),
             U256::from_be_slice(_signature.s().to_bytes().as_slice()),
             recoverid.is_y_odd(),
