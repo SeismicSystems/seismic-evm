@@ -4,7 +4,7 @@ use crate::{
     hardfork::{SeismicChainHardforks, SeismicHardforks},
     SeismicEvmFactory,
 };
-use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt};
+use alloy_consensus::{Transaction, TxReceipt};
 use alloy_eips::Encodable2718;
 use alloy_evm::{
     block::{
@@ -21,7 +21,11 @@ use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
 pub mod receipt_builder;
-use alloy_evm::block::InternalBlockExecutionError;
+use alloy_evm::{
+    block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
+    FromTxWithEncoded,
+};
+use revm::context::result::ExecutionResult;
 use seismic_alloy_consensus::InputDecryptionElements;
 use seismic_enclave::{client::rpc::SyncEnclaveApiClient, rpc::SyncEnclaveApiClientBuilder};
 
@@ -29,7 +33,7 @@ type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
 /// Block executor for Seismic.
 /// Wraps a [`EthBlockExecutor`] and decrypts the transaction input before executing
-/// 
+///
 /// Note that only execute endpoints (e.g. eth_sendRawTransaction) will route through
 /// the block executor, not simulate endpoints (e.g. eth_call, eth_estimateGas).
 #[derive(Debug)]
@@ -61,10 +65,20 @@ where
     }
 }
 
+use crate::IntoTxEnv;
+use alloy_evm::RecoveredTx;
+
 impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
+    E: Evm<
+        DB = &'db mut State<DB>,
+        Tx: FromRecoveredTx<R::Transaction>
+                + FromTxWithEncoded<R::Transaction>
+                + RecoveredTx<R::Transaction>
+                + Copy
+                + InputDecryptionElements,
+    >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
         Transaction: Transaction + Encodable2718 + InputDecryptionElements,
@@ -80,17 +94,36 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        // seismic upstream merge: need to figure out how I can decrypt
+        todo!("SeismicBlockExecutor::execute_transaction_with_commit_condition unimplimented in seismic-evm");
+
+        // let mut tx = tx.into_tx_env();
+        // let inner_ptr = tx.inner_mut();
+        // let plaintext_copy = inner_ptr
+        //     .plaintext_copy(&self.enclave_client)
+        //     .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
+        // *inner_ptr = &plaintext_copy;
+
+        // self.inner.execute_transaction_with_commit_condition(tx, f)
+    }
+
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&Self::Transaction>,
-        f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let mut tx = tx.clone();
-        let inner_ptr = tx.inner_mut();
-        let plaintext_copy = inner_ptr
+        let mut tx: <E as Evm>::Tx = tx.into_tx_env();
+        let plaintext_copy = tx
             .plaintext_copy(&self.enclave_client)
             .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-        *inner_ptr = &plaintext_copy;
+        let copy: <E as Evm>::Tx = plaintext_copy.clone();
+
+        // ExecutableTx<EthBlockExecutor<'_, E, Spec, R>>
 
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
@@ -105,6 +138,10 @@ where
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        self.inner.evm()
     }
 }
 
@@ -166,7 +203,9 @@ where
         Receipt: TxReceipt<Log = Log>,
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
-    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction>>,
+    EvmF: EvmFactory<
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + RecoveredTx<R::Transaction> + Copy + InputDecryptionElements,
+    >,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
 {
@@ -178,6 +217,8 @@ where
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
     }
+
+    // <EvmF as EvmFactory>::Tx: RecoveredTx<<R as ReceiptBuilder>::Transaction>` 
 
     fn create_executor<'a, DB, I>(
         &'a self,
@@ -195,11 +236,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
-    use alloy_primitives::{
-        aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256,
-    };
+    use alloy_primitives::{aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256};
     use k256::ecdsa::{SigningKey, VerifyingKey};
     use revm::{
         context::{BlockEnv, CfgEnv},
@@ -212,10 +252,9 @@ mod tests {
     };
     use seismic_revm::SeismicSpecId;
 
+    use alloy_consensus::transaction::Recovered;
     use alloy_primitives::Address;
     use seismic_alloy_consensus::SeismicTxEnvelope;
-
-    use super::*;
 
     fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
         let _signature = signing_key
