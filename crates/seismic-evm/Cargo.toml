@@ -14,12 +14,26 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alloy-evm = { workspace = true, features = ["op"] }
+# alloy
+alloy-evm = { workspace = true }
 alloy-primitives.workspace = true
+alloy-hardforks.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+
+# revm
 revm.workspace = true
 
+# seismic
 seismic-revm = {workspace = true, features = ["secp256k1"]}
 seismic-enclave.workspace = true
+seismic-alloy-consensus = { workspace = true, features = ["std", "serde"] }
+
+# misc
+auto_impl.workspace = true
+
+[dev-dependencies]
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
 [features]
 default = ["std"]
