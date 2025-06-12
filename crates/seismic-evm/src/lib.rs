@@ -7,7 +7,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
+use alloy_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
 use revm::{
@@ -29,6 +29,7 @@ use seismic_revm::{
     DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
+use std::marker::PhantomData;
 
 pub mod block;
 pub mod hardfork;
@@ -248,28 +249,29 @@ where
 // Adding the enclave client here,
 // given the enclave related information gets fed at EVM creation in the chain object.
 // Wiring still TODO
-pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
+pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder, RevmDB: Database> {
     #[allow(dead_code)]
     enclave_client: Arc<T::Client>,
+    _revm_db: PhantomData<RevmDB>,
 }
 
-impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
+impl<T: SyncEnclaveApiClientBuilder, RevmDB: Database> SeismicEvmFactory<T, RevmDB> {
     /// Creates a new [`SeismicEvmFactory`].
     pub fn new(enclave_client_builder: T) -> Self {
         let enclave_client = enclave_client_builder.build();
-        Self { enclave_client: Arc::new(enclave_client) }
+        Self { enclave_client: Arc::new(enclave_client), _revm_db: PhantomData }
     }
 }
 
-impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
-    type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
-    type Context<DB: Database> = SeismicContext<DB>;
+impl<T: SyncEnclaveApiClientBuilder, RevmDB: Database> EvmFactory for SeismicEvmFactory<T, RevmDB> {
+    type Evm<DB, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
+    type Context<DB> = SeismicContext<DB>;
     type Tx = SeismicTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> =
         EVMError<DBError, InvalidTransaction>;
     type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
-    type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
+    type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(
         &self,
