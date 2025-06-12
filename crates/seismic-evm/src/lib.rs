@@ -26,7 +26,7 @@ use seismic_revm::{
     instructions::instruction_provider::SeismicInstructions,
     precompiles::SeismicPrecompiles,
     transaction::abstraction::{RngMode, SeismicTransaction},
-    DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
+    DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
 
@@ -281,7 +281,7 @@ impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_seismic_with_inspector(NoOpInspector {}),
+                .build_seismic_evm_with_inspector(NoOpInspector {}),
             inspect: false,
         }
     }
@@ -297,7 +297,7 @@ impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_seismic_with_inspector(inspector),
+                .build_seismic_evm_with_inspector(inspector),
             inspect: true,
         }
     }

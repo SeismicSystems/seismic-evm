@@ -21,9 +21,10 @@ use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
 pub mod receipt_builder;
+use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
-    FromTxWithEncoded,
+    FromTxWithEncoded, RecoveredTx,
 };
 use revm::context::result::ExecutionResult;
 use seismic_alloy_consensus::InputDecryptionElements;
@@ -65,21 +66,12 @@ where
     }
 }
 
-use crate::IntoTxEnv;
-use alloy_consensus::transaction::Recovered;
-use alloy_evm::RecoveredTx;
-
 impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
 where
     DB: Database + 'db,
     E: Evm<
         DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction>
-                + FromTxWithEncoded<R::Transaction>
-                // + ExecutableTx<Self> // cannot do, infinite loop in compiler
-                + RecoveredTx<<E as Evm>::Tx>
-                + Copy
-                + IntoTxEnv<<E as Evm>::Tx>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -211,13 +203,7 @@ where
         Receipt: TxReceipt<Log = Log>,
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
-    EvmF: EvmFactory<
-        Tx: FromRecoveredTx<R::Transaction>
-                + FromTxWithEncoded<R::Transaction>
-                + RecoveredTx<<EvmF as EvmFactory>::Tx>
-                + Copy
-                + IntoTxEnv<<EvmF as EvmFactory>::Tx>,
-    >,
+    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
 {
@@ -258,10 +244,7 @@ mod tests {
         database::{InMemoryDB, StateBuilder},
     };
     use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
-    use seismic_enclave::{
-        nonce::Nonce, rand, tx_io::IoEncryptionRequest, MockEnclaveClientBuilder, PublicKey,
-        Secp256k1, SecretKey,
-    };
+    use seismic_enclave::{rand, MockEnclaveClientBuilder, Nonce, PublicKey, Secp256k1, SecretKey};
     use seismic_revm::SeismicSpecId;
 
     use alloy_consensus::transaction::Recovered;
@@ -350,17 +333,15 @@ mod tests {
     }
 
     fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
-        let ciphertext = setup
-            .enclave_builder
-            .clone()
-            .build()
-            .encrypt(IoEncryptionRequest {
-                key: setup.encryption_pubkey,
-                data: plaintext.as_bytes().to_vec(),
-                nonce: setup.encryption_nonce.clone(),
-            })
-            .unwrap()
-            .encrypted_data;
+        let enclave_client = setup.enclave_builder.clone().build();
+
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+        };
+        let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
+        let ciphertext = seismic_elements.server_encrypt(&enclave_client, &pt_bytes).unwrap();
         TxSeismic {
             chain_id: 5124,
             nonce: 0,
@@ -369,11 +350,7 @@ mod tests {
             to: TxKind::Call(Address::ZERO),
             value: U256::from(0),
             input: Bytes::from(ciphertext),
-            seismic_elements: TxSeismicElements {
-                encryption_pubkey: setup.encryption_pubkey,
-                encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
-                message_version: 0,
-            },
+            seismic_elements,
         }
     }
 
@@ -400,7 +377,6 @@ mod tests {
     // Expected behavior for now is panic as MockClient panics on bad encryption/decryption
     // This test case may need to be updated if the MockClient is changed to return
     #[test]
-    #[should_panic]
     fn test_incorrect_encryption() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
