@@ -4,7 +4,7 @@ use crate::{
     hardfork::{SeismicChainHardforks, SeismicHardforks},
     SeismicEvmFactory,
 };
-use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt};
+use alloy_consensus::{Transaction, TxReceipt};
 use alloy_eips::Encodable2718;
 use alloy_evm::{
     block::{
@@ -70,7 +70,7 @@ where
     DB: Database + 'db,
     E: Evm<
         DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + ExecutableTx<Self> + InputDecryptionElements,
     >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -110,12 +110,13 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let mut tx = tx.clone();
-        let inner_ptr = tx.inner_mut();
-        let plaintext_copy = inner_ptr
+        let mut tx: <E as Evm>::Tx = tx.into_tx_env();
+        let plaintext_copy = tx
             .plaintext_copy(&self.enclave_client)
             .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-        *inner_ptr = &plaintext_copy;
+        let copy: <E as Evm>::Tx = plaintext_copy.clone();
+
+        // ExecutableTx<EthBlockExecutor<'_, E, Spec, R>>
 
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
@@ -209,10 +210,10 @@ where
     }
 
     fn create_executor<'a, DB, I>(
-        &'a self,
-        evm: EvmF::Evm<&'a mut State<DB>, I>,
+        &'a self,        evm: EvmF::Evm<&'a mut State<DB>, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
+
     where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
@@ -224,6 +225,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
     use alloy_primitives::{aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256};
@@ -241,8 +243,7 @@ mod tests {
 
     use alloy_primitives::Address;
     use seismic_alloy_consensus::SeismicTxEnvelope;
-
-    use super::*;
+    use alloy_consensus::transaction::Recovered;
 
     fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
         let _signature = signing_key
