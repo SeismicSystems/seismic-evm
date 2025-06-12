@@ -65,6 +65,9 @@ where
     }
 }
 
+use crate::IntoTxEnv;
+use alloy_evm::RecoveredTx;
+
 impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
 where
     DB: Database + 'db,
@@ -72,7 +75,8 @@ where
         DB = &'db mut State<DB>,
         Tx: FromRecoveredTx<R::Transaction>
                 + FromTxWithEncoded<R::Transaction>
-                + ExecutableTx<Self>
+                + RecoveredTx<R::Transaction>
+                + Copy
                 + InputDecryptionElements,
     >,
     Spec: EthExecutorSpec,
@@ -199,7 +203,9 @@ where
         Receipt: TxReceipt<Log = Log>,
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
-    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
+    EvmF: EvmFactory<
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + RecoveredTx<R::Transaction> + Copy + InputDecryptionElements,
+    >,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
 {
@@ -211,6 +217,8 @@ where
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
     }
+
+    // <EvmF as EvmFactory>::Tx: RecoveredTx<<R as ReceiptBuilder>::Transaction>` 
 
     fn create_executor<'a, DB, I>(
         &'a self,
