@@ -440,6 +440,15 @@ mod op {
     }
 }
 
+impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
+    fn from_encoded_tx(tx: &SeismicTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
+        let tx_env = SeismicTransaction::<TxEnv>::from_recovered_tx(tx, sender);
+
+        Self { base: tx_env.base, tx_hash: tx_env.tx_hash, rng_mode: RngMode::Execution }
+    }
+}
+
+// seismic upstream merge: this is still needed?
 /// Necessary to run a test case that uses the SeismicAlloyReceiptBuilder for the SeismicEvm
 /// Necessary to include in this crate due to the orphan rule.
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
