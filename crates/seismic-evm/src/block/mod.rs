@@ -66,6 +66,7 @@ where
 }
 
 use crate::IntoTxEnv;
+use alloy_consensus::transaction::Recovered;
 use alloy_evm::RecoveredTx;
 
 impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
@@ -75,12 +76,10 @@ where
         DB = &'db mut State<DB>,
         Tx: FromRecoveredTx<R::Transaction>
                 + FromTxWithEncoded<R::Transaction>
-
                 // + ExecutableTx<Self> // cannot do, infinite loop in compiler
                 + RecoveredTx<R::Transaction>
                 + Copy
-                + IntoTxEnv<<E as Evm>::Tx>
-                
+                + IntoTxEnv<<E as Evm>::Tx>,
     >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -102,17 +101,19 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        // seismic upstream merge: need to figure out how I can decrypt
-        todo!("SeismicBlockExecutor::execute_transaction_with_commit_condition unimplimented in seismic-evm");
+        // Convert from ExecutableTx<Self> to R::Transaction,
+        // which has the InputDecryptionElements bound
+        let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // let mut tx = tx.into_tx_env();
-        // let inner_ptr = tx.inner_mut();
-        // let plaintext_copy = inner_ptr
-        //     .plaintext_copy(&self.enclave_client)
-        //     .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-        // *inner_ptr = &plaintext_copy;
+        // decrypt
+        let plaintext_base = receipt_tx
+            .plaintext_copy(&self.enclave_client)
+            .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
 
-        // self.inner.execute_transaction_with_commit_condition(tx, f)
+        // call inner
+        let signer = RecoveredTx::signer(&tx);
+        let recovered = Recovered::new_unchecked(plaintext_base, *signer);
+        self.inner.execute_transaction_with_commit_condition(&recovered, f)
     }
 
     fn execute_transaction_with_result_closure(
@@ -120,16 +121,19 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        // let mut tx: <E as Evm>::Tx = tx.into_tx_env();
-        // let plaintext_copy = tx
-        //     .plaintext_copy(&self.enclave_client)
-        //     .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-        // let copy: <E as Evm>::Tx = plaintext_copy.clone();
+        // Convert from ExecutableTx<Self> to R::Transaction,
+        // which has the InputDecryptionElements bound
+        let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // // ExecutableTx<EthBlockExecutor<'_, E, Spec, R>>
+        // decrypt
+        let plaintext_base = receipt_tx
+            .plaintext_copy(&self.enclave_client)
+            .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
 
-        // self.inner.execute_transaction_with_result_closure(tx, f)
-        todo!()
+        // call inner
+        let signer = RecoveredTx::signer(&tx);
+        let recovered = Recovered::new_unchecked(plaintext_base, *signer);
+        self.inner.execute_transaction_with_result_closure(&recovered, f)
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -208,7 +212,10 @@ where
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + RecoveredTx<R::Transaction> + Copy,
+        Tx: FromRecoveredTx<R::Transaction>
+                + FromTxWithEncoded<R::Transaction>
+                + RecoveredTx<R::Transaction>
+                + Copy,
     >,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
@@ -222,7 +229,7 @@ where
         &self.evm_factory
     }
 
-    // <EvmF as EvmFactory>::Tx: RecoveredTx<<R as ReceiptBuilder>::Transaction>` 
+    // <EvmF as EvmFactory>::Tx: RecoveredTx<<R as ReceiptBuilder>::Transaction>`
 
     fn create_executor<'a, DB, I>(
         &'a self,
