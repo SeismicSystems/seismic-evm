@@ -21,9 +21,10 @@ use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
 pub mod receipt_builder;
+use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
-    FromTxWithEncoded,
+    FromTxWithEncoded, RecoveredTx,
 };
 use revm::context::result::ExecutionResult;
 use seismic_alloy_consensus::InputDecryptionElements;
@@ -65,21 +66,12 @@ where
     }
 }
 
-use crate::IntoTxEnv;
-use alloy_consensus::transaction::Recovered;
-use alloy_evm::RecoveredTx;
-
 impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
 where
     DB: Database + 'db,
     E: Evm<
         DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction>
-                + FromTxWithEncoded<R::Transaction>
-                // + ExecutableTx<Self> // cannot do, infinite loop in compiler
-                + RecoveredTx<<E as Evm>::Tx>
-                + Copy
-                + IntoTxEnv<<E as Evm>::Tx>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -211,13 +203,7 @@ where
         Receipt: TxReceipt<Log = Log>,
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
-    EvmF: EvmFactory<
-        Tx: FromRecoveredTx<R::Transaction>
-                + FromTxWithEncoded<R::Transaction>
-                + RecoveredTx<<EvmF as EvmFactory>::Tx>
-                + Copy
-                + IntoTxEnv<<EvmF as EvmFactory>::Tx>,
-    >,
+    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
 {
