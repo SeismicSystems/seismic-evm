@@ -75,9 +75,12 @@ where
         DB = &'db mut State<DB>,
         Tx: FromRecoveredTx<R::Transaction>
                 + FromTxWithEncoded<R::Transaction>
+
+                // + ExecutableTx<Self> // cannot do, infinite loop in compiler
                 + RecoveredTx<R::Transaction>
                 + Copy
-                + InputDecryptionElements,
+                + IntoTxEnv<<E as Evm>::Tx>
+                
     >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -117,15 +120,16 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let mut tx: <E as Evm>::Tx = tx.into_tx_env();
-        let plaintext_copy = tx
-            .plaintext_copy(&self.enclave_client)
-            .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
-        let copy: <E as Evm>::Tx = plaintext_copy.clone();
+        // let mut tx: <E as Evm>::Tx = tx.into_tx_env();
+        // let plaintext_copy = tx
+        //     .plaintext_copy(&self.enclave_client)
+        //     .map_err(|e| InternalBlockExecutionError::Other(Box::new(e)))?;
+        // let copy: <E as Evm>::Tx = plaintext_copy.clone();
 
-        // ExecutableTx<EthBlockExecutor<'_, E, Spec, R>>
+        // // ExecutableTx<EthBlockExecutor<'_, E, Spec, R>>
 
-        self.inner.execute_transaction_with_result_closure(tx, f)
+        // self.inner.execute_transaction_with_result_closure(tx, f)
+        todo!()
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -204,7 +208,7 @@ where
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + RecoveredTx<R::Transaction> + Copy + InputDecryptionElements,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + RecoveredTx<R::Transaction> + Copy,
     >,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
