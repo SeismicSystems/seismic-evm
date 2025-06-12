@@ -77,7 +77,7 @@ where
         Tx: FromRecoveredTx<R::Transaction>
                 + FromTxWithEncoded<R::Transaction>
                 // + ExecutableTx<Self> // cannot do, infinite loop in compiler
-                + RecoveredTx<R::Transaction>
+                + RecoveredTx<<E as Evm>::Tx>
                 + Copy
                 + IntoTxEnv<<E as Evm>::Tx>,
     >,
@@ -214,8 +214,9 @@ where
     EvmF: EvmFactory<
         Tx: FromRecoveredTx<R::Transaction>
                 + FromTxWithEncoded<R::Transaction>
-                + RecoveredTx<R::Transaction>
-                + Copy,
+                + RecoveredTx<<EvmF as EvmFactory>::Tx>
+                + Copy
+                + IntoTxEnv<<EvmF as EvmFactory>::Tx>,
     >,
     CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
