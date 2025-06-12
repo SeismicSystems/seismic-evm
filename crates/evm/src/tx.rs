@@ -1,20 +1,22 @@
 //! Abstraction of an executable transaction.
 
 use alloy_consensus::{
-    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, TxEip1559, TxEip2930,
-    TxEip4844, TxEip7702, TxLegacy,
+    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Transaction, TxEip1559,
+    TxEip2930, TxEip4844, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
-    eip2718::{WithEncoded, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID, EIP4844_TX_TYPE_ID},
-    eip7702::{RecoveredAuthority, RecoveredAuthorization},
+    eip2718::{
+        WithEncoded, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+        EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    },
     eip2930::AccessList,
+    eip7702::{RecoveredAuthority, RecoveredAuthorization},
     Typed2718,
 };
 use alloy_primitives::{Address, Bytes, TxKind};
 use revm::{context::TxEnv, context_interface::either::Either};
 use seismic_alloy_consensus::{SeismicTxEnvelope, SEISMIC_TX_TYPE_ID};
 use seismic_revm::{transaction::abstraction::RngMode, SeismicTransaction};
-use alloy_consensus::Transaction;
 
 /// Trait marking types that can be converted into a transaction environment.
 pub trait IntoTxEnv<TxEnv> {
