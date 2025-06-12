@@ -3831,7 +3831,7 @@ dependencies = [
 [[package]]
 name = "seismic-alloy-consensus"
 version = "0.0.1"
-source = "git+https://github.com/SeismicSystems/seismic-alloy.git?rev=4ea0aaa#4ea0aaa6f9609e21d6ae084e16022eeddecc3143"
+source = "git+https://github.com/SeismicSystems/seismic-alloy.git?rev=34353d4#34353d48359989580437be6e34a19005ee867a55"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
