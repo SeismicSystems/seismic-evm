@@ -21,10 +21,10 @@ use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
 pub mod receipt_builder;
-use alloy_evm::block::CommitChanges;
-use alloy_evm::block::ExecutableTx;
-use alloy_evm::block::InternalBlockExecutionError;
-use alloy_evm::FromTxWithEncoded;
+use alloy_evm::{
+    block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
+    FromTxWithEncoded,
+};
 use revm::context::result::ExecutionResult;
 use seismic_alloy_consensus::InputDecryptionElements;
 use seismic_enclave::{client::rpc::SyncEnclaveApiClient, rpc::SyncEnclaveApiClientBuilder};
@@ -70,7 +70,10 @@ where
     DB: Database + 'db,
     E: Evm<
         DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + ExecutableTx<Self> + InputDecryptionElements,
+        Tx: FromRecoveredTx<R::Transaction>
+                + FromTxWithEncoded<R::Transaction>
+                + ExecutableTx<Self>
+                + InputDecryptionElements,
     >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -94,7 +97,7 @@ where
     ) -> Result<Option<u64>, BlockExecutionError> {
         // seismic upstream merge: need to figure out how I can decrypt
         todo!("SeismicBlockExecutor::execute_transaction_with_commit_condition unimplimented in seismic-evm");
-        
+
         // let mut tx = tx.into_tx_env();
         // let inner_ptr = tx.inner_mut();
         // let plaintext_copy = inner_ptr
@@ -210,10 +213,10 @@ where
     }
 
     fn create_executor<'a, DB, I>(
-        &'a self,        evm: EvmF::Evm<&'a mut State<DB>, I>,
+        &'a self,
+        evm: EvmF::Evm<&'a mut State<DB>, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
-
     where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
@@ -241,9 +244,9 @@ mod tests {
     };
     use seismic_revm::SeismicSpecId;
 
+    use alloy_consensus::transaction::Recovered;
     use alloy_primitives::Address;
     use seismic_alloy_consensus::SeismicTxEnvelope;
-    use alloy_consensus::transaction::Recovered;
 
     fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
         let _signature = signing_key
