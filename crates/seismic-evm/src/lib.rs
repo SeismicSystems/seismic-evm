@@ -21,7 +21,7 @@ use revm::{
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
     Context, ExecuteEvm, InspectEvm, Inspector,
 };
-use seismic_enclave::EnclaveClient;
+use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
 use seismic_revm::{
     instructions::instruction_provider::SeismicInstructions,
     precompiles::SeismicPrecompiles,
@@ -29,6 +29,9 @@ use seismic_revm::{
     DefaultSeismic, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
+
+pub mod block;
+pub mod hardfork;
 
 /// Seismic EVM implementation.
 ///
@@ -245,19 +248,20 @@ where
 // Adding the enclave client here,
 // given the enclave related information gets fed at EVM creation in the chain object.
 // Wiring still TODO
-pub struct SeismicEvmFactory {
+pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
     #[allow(dead_code)]
-    enclave_client: Arc<EnclaveClient>,
+    enclave_client: Arc<T::Client>,
 }
 
-impl SeismicEvmFactory {
+impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     /// Creates a new [`SeismicEvmFactory`].
-    pub fn new(enclave_client: Arc<EnclaveClient>) -> Self {
-        Self { enclave_client }
+    pub fn new(enclave_client_builder: T) -> Self {
+        let enclave_client = enclave_client_builder.build();
+        Self { enclave_client: Arc::new(enclave_client) }
     }
 }
 
-impl EvmFactory for SeismicEvmFactory {
+impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
     type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
     type Context<DB: Database> = SeismicContext<DB>;
     type Tx = SeismicTransaction<TxEnv>;
