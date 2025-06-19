@@ -386,7 +386,6 @@ mod tests {
     // Expected behavior for now is panic as MockClient panics on bad encryption/decryption
     // This test case may need to be updated if the MockClient is changed to return
     #[test]
-    #[should_panic]
     fn test_incorrect_encryption() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
