@@ -14,18 +14,22 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-consensus = { workspace = true, features = ["k256"] }
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-hardforks.workspace = true
 
+seismic-revm = { workspace = true }
 revm.workspace = true
 op-revm = { workspace = true, optional = true }
+op-alloy-consensus = { workspace = true, optional = true }
+seismic-alloy-consensus.workspace = true
 
 auto_impl.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
+
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
@@ -33,14 +37,20 @@ serde_json.workspace = true
 
 [features]
 default = ["std"]
-std = [
-	"alloy-primitives/std",
-	"revm/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-sol-types/std",
-	"derive_more/std",
-	"op-revm?/std",
-	"thiserror/std"
+secp256k1 = [
+    "std",
+    "alloy-consensus/secp256k1",
 ]
-op = ["op-revm"]
+std = [
+	"seismic-revm/std",
+    "alloy-primitives/std",
+    "revm/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-sol-types/std",
+    "derive_more/std",
+    "op-revm?/std",
+    "thiserror/std",
+    "op-alloy-consensus?/std"
+]
+op = ["op-revm", "op-alloy-consensus"]

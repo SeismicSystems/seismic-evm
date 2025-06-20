@@ -1,8 +1,9 @@
 //! Block execution abstraction.
 
-use crate::{Database, Evm, EvmFactory};
+use crate::{
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, RecoveredTx,
+};
 use alloc::{boxed::Box, vec::Vec};
-use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip7685::Requests;
 use revm::{
     context::result::ExecutionResult, database::State, inspector::NoOpInspector, Inspector,
@@ -32,6 +33,33 @@ pub struct BlockExecutionResult<T> {
     pub gas_used: u64,
 }
 
+/// Helper trait to encapsulate requirements for a type to be used as input for [`BlockExecutor`].
+pub trait ExecutableTx<E: BlockExecutor + ?Sized>:
+    IntoTxEnv<<E::Evm as Evm>::Tx> + RecoveredTx<E::Transaction> + Copy
+{
+}
+impl<E: BlockExecutor, T> ExecutableTx<E> for T where
+    T: IntoTxEnv<<E::Evm as Evm>::Tx> + RecoveredTx<E::Transaction> + Copy
+{
+}
+
+/// Marks whether transaction should be commited into block executor's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum CommitChanges {
+    /// Transaction should be commited into block executor's state.
+    Yes,
+    /// Transaction should not be commited.
+    No,
+}
+
+impl CommitChanges {
+    /// Returns `true` if transaction should be commited into block executor's state.
+    pub fn should_commit(self) -> bool {
+        matches!(self, Self::Yes)
+    }
+}
+
 /// A type that knows how to execute a single block.
 ///
 /// The current abstraction assumes that block execution consists of the following steps:
@@ -49,7 +77,7 @@ pub trait BlockExecutor {
     /// Receipt type this executor produces.
     type Receipt;
     /// EVM used by the executor.
-    type Evm: Evm;
+    type Evm: Evm<Tx: FromRecoveredTx<Self::Transaction> + FromTxWithEncoded<Self::Transaction>>;
 
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
@@ -59,7 +87,7 @@ pub trait BlockExecutor {
     /// Returns the gas used by the transaction.
     fn execute_transaction(
         &mut self,
-        tx: Recovered<&Self::Transaction>,
+        tx: impl ExecutableTx<Self>,
     ) -> Result<u64, BlockExecutionError> {
         self.execute_transaction_with_result_closure(tx, |_| ())
     }
@@ -68,9 +96,26 @@ pub trait BlockExecutor {
     /// given closure with an internal [`ExecutionResult`] produced by the EVM.
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&Self::Transaction>,
+        tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError>;
+    ) -> Result<u64, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(tx, |res| {
+            f(res);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
+
+    /// Executes a single transaction and applies execution result to internal state. Invokes the
+    /// given closure with an internal [`ExecutionResult`] produced by the EVM, and commits the
+    /// transaction to the state on [`CommitChanges::Yes`].
+    ///
+    /// Returns [`None`] if transaction was skipped via [`CommitChanges::No`].
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError>;
 
     /// Applies any necessary changes after executing the block's transactions, completes execution
     /// and returns the underlying EVM along with execution result.
@@ -103,6 +148,26 @@ pub trait BlockExecutor {
 
     /// Exposes mutable reference to EVM.
     fn evm_mut(&mut self) -> &mut Self::Evm;
+
+    /// Exposes immutable reference to EVM.
+    fn evm(&self) -> &Self::Evm;
+
+    /// Executes all transactions in a block, applying pre and post execution changes.
+    fn execute_block(
+        mut self,
+        transactions: impl IntoIterator<Item = impl ExecutableTx<Self>>,
+    ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
+    where
+        Self: Sized,
+    {
+        self.apply_pre_execution_changes()?;
+
+        for tx in transactions {
+            self.execute_transaction(tx)?;
+        }
+
+        self.apply_post_execution_changes()
+    }
 }
 
 /// A helper trait encapsulating the constraints on [`BlockExecutor`] produced by the

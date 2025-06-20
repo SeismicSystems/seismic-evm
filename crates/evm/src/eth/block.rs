@@ -10,13 +10,13 @@ use crate::{
     block::{
         state_changes::{balance_increment_state, post_block_balance_increments},
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, BlockValidationError, OnStateHook, StateChangePostBlockSource,
-        StateChangeSource, SystemCaller,
+        BlockExecutorFor, BlockValidationError, CommitChanges, ExecutableTx, OnStateHook,
+        StateChangePostBlockSource, StateChangeSource, SystemCaller,
     },
-    Database, Evm, EvmFactory, FromRecoveredTx,
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
-use alloy_consensus::{transaction::Recovered, Header, Transaction, TxReceipt};
+use alloy_consensus::{Header, Transaction, TxReceipt};
 use alloy_eips::{eip4895::Withdrawals, eip7685::Requests, Encodable2718};
 use alloy_hardforks::EthereumHardfork;
 use alloy_primitives::{Log, B256};
@@ -81,7 +81,10 @@ where
 impl<'db, DB, E, Spec, R> BlockExecutor for EthBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
+    E: Evm<
+        DB = &'db mut State<DB>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    >,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
 {
@@ -102,30 +105,34 @@ where
         Ok(())
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
-        tx: Recovered<&R::Transaction>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError> {
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
         let block_available_gas = self.evm.block().gas_limit - self.gas_used;
-        if tx.gas_limit() > block_available_gas {
+
+        if tx.tx().gas_limit() > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.gas_limit(),
+                transaction_gas_limit: tx.tx().gas_limit(),
                 block_available_gas,
             }
             .into());
         }
 
         // Execute transaction.
-        let result_and_state =
-            self.evm.transact(tx).map_err(|err| BlockExecutionError::evm(err, tx.trie_hash()))?;
-        self.system_caller
-            .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
-        let ResultAndState { result, state } = result_and_state;
+        let ResultAndState { result, state } = self
+            .evm
+            .transact(tx)
+            .map_err(|err| BlockExecutionError::evm(err, tx.tx().trie_hash()))?;
 
-        f(&result);
+        if !f(&result).should_commit() {
+            return Ok(None);
+        }
+
+        self.system_caller.on_state(StateChangeSource::Transaction(self.receipts.len()), &state);
 
         let gas_used = result.gas_used();
 
@@ -134,7 +141,7 @@ where
 
         // Push transaction changeset and calculate header bloom filter for receipt.
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-            tx: &tx,
+            tx: tx.tx(),
             evm: &self.evm,
             result,
             state: &state,
@@ -144,7 +151,7 @@ where
         // Commit the state changes.
         self.evm.db_mut().commit(state);
 
-        Ok(gas_used)
+        Ok(Some(gas_used))
     }
 
     fn finish(
@@ -222,6 +229,10 @@ where
     fn evm_mut(&mut self) -> &mut Self::Evm {
         &mut self.evm
     }
+
+    fn evm(&self) -> &Self::Evm {
+        &self.evm
+    }
 }
 
 /// Ethereum block executor factory.
@@ -266,7 +277,7 @@ impl<R, Spec, EvmF> BlockExecutorFactory for EthBlockExecutorFactory<R, Spec, Ev
 where
     R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
     Spec: EthExecutorSpec,
-    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction>>,
+    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
     Self: 'static,
 {
     type EvmFactory = EvmF;
