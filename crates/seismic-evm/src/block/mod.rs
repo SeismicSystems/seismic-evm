@@ -244,9 +244,7 @@ mod tests {
         database::{InMemoryDB, StateBuilder},
     };
     use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
-    use seismic_enclave::{
-        rand, MockEnclaveClientBuilder, Nonce, PublicKey, Secp256k1, SecretKey,
-    };
+    use seismic_enclave::{rand, MockEnclaveClientBuilder, Nonce, PublicKey, Secp256k1, SecretKey};
     use seismic_revm::SeismicSpecId;
 
     use alloy_consensus::transaction::Recovered;
@@ -335,11 +333,8 @@ mod tests {
     }
 
     fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
-        let enclave_client = setup
-            .enclave_builder
-            .clone()
-            .build(); 
-        
+        let enclave_client = setup.enclave_builder.clone().build();
+
         let seismic_elements = TxSeismicElements {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),

@@ -23,7 +23,10 @@ use revm::{
 };
 use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
 use seismic_revm::{
-    instructions::instruction_provider::SeismicInstructions, precompiles::SeismicPrecompiles, transaction::abstraction::{RngMode, SeismicTransaction}, DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId
+    instructions::instruction_provider::SeismicInstructions,
+    precompiles::SeismicPrecompiles,
+    transaction::abstraction::{RngMode, SeismicTransaction},
+    DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
 
