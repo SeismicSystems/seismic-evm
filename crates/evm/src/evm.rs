@@ -159,7 +159,7 @@ pub trait EvmFactory {
         HaltReason = Self::HaltReason,
         Error = Self::Error<DB::Error>,
         Spec = Self::Spec,
-        Precompiles = Self::Precompiles,
+        Precompiles = Self::Precompiles<DB>,
         Inspector = I,
     >;
 
@@ -174,7 +174,7 @@ pub trait EvmFactory {
     /// The EVM specification identifier, see [`Evm::Spec`].
     type Spec: Debug + Copy + Hash + Eq + Send + Sync + Default + 'static;
     /// Precompiles used by the EVM.
-    type Precompiles;
+    type Precompiles<DB: Database>;
 
     /// Creates a new instance of an EVM.
     fn create_evm<DB: Database>(

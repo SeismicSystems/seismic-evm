@@ -7,70 +7,84 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
-use alloc::vec::Vec;
-use alloy_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
+use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
-use core::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
-use op_alloy_consensus::OpTxType;
-use op_revm::{
-    precompiles::OpPrecompiles, DefaultOp, OpBuilder, OpContext, OpHaltReason, OpSpecId,
-    OpTransaction, OpTransactionError,
-};
+use core::ops::{Deref, DerefMut};
 use revm::{
-    context::{BlockEnv, TxEnv},
-    context_interface::result::{EVMError, ResultAndState},
-    handler::{instructions::EthInstructions, PrecompileProvider},
+    context::{result::InvalidTransaction, BlockEnv, TxEnv},
+    context_interface::{
+        result::{EVMError, ResultAndState},
+        ContextTr,
+    },
+    handler::PrecompileProvider,
     inspector::NoOpInspector,
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
     Context, ExecuteEvm, InspectEvm, Inspector,
 };
+use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
+use seismic_revm::{
+    instructions::instruction_provider::SeismicInstructions, precompiles::SeismicPrecompiles, transaction::abstraction::{RngMode, SeismicTransaction}, DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId
+};
+use std::sync::Arc;
 
 pub mod block;
-pub use block::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory};
+pub mod hardfork;
 
-/// OP EVM implementation.
+/// Seismic EVM implementation.
 ///
 /// This is a wrapper type around the `revm` evm with optional [`Inspector`] (tracing)
 /// support. [`Inspector`] support is configurable at runtime because it's part of the underlying
-/// [`OpEvm`](op_revm::OpEvm) type.
-#[allow(missing_debug_implementations)] // missing revm::OpContext Debug impl
-pub struct OpEvm<DB: Database, I, P = OpPrecompiles> {
-    inner: op_revm::OpEvm<OpContext<DB>, I, EthInstructions<EthInterpreter, OpContext<DB>>, P>,
+/// [`SeismicEvm`](seismic_revm::SeismicEvm) type.
+#[allow(missing_debug_implementations)]
+pub struct SeismicEvm<DB: Database, I, P = SeismicPrecompiles<SeismicContext<DB>>> {
+    inner: seismic_revm::SeismicEvm<
+        SeismicContext<DB>,
+        I,
+        SeismicInstructions<EthInterpreter, SeismicContext<DB>>,
+        P,
+    >,
     inspect: bool,
 }
 
-impl<DB: Database, I, P> OpEvm<DB, I, P> {
+impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
     /// Provides a reference to the EVM context.
-    pub const fn ctx(&self) -> &OpContext<DB> {
+    pub const fn ctx(&self) -> &SeismicContext<DB> {
         &self.inner.0.ctx
     }
 
     /// Provides a mutable reference to the EVM context.
-    pub fn ctx_mut(&mut self) -> &mut OpContext<DB> {
+    pub fn ctx_mut(&mut self) -> &mut SeismicContext<DB> {
         &mut self.inner.0.ctx
     }
-}
 
-impl<DB: Database, I, P> OpEvm<DB, I, P> {
-    /// Creates a new OP EVM instance.
-    ///
-    /// The `inspect` argument determines whether the configured [`Inspector`] of the given
-    /// [`OpEvm`](op_revm::OpEvm) should be invoked on [`Evm::transact`].
-    pub const fn new(
-        evm: op_revm::OpEvm<OpContext<DB>, I, EthInstructions<EthInterpreter, OpContext<DB>>, P>,
-        inspect: bool,
-    ) -> Self {
-        Self { inner: evm, inspect }
+    /// Provides a mutable reference to the EVM inspector.
+    pub fn inspector_mut(&mut self) -> &mut I {
+        &mut self.inner.0.inspector
+    }
+
+    /// returns an immutable reference to the EVM precompiles.
+    pub fn precompiles(&self) -> &P {
+        &self.inner.0.precompiles
     }
 }
 
-impl<DB: Database, I, P> Deref for OpEvm<DB, I, P> {
-    type Target = OpContext<DB>;
+impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
+    /// creates a new [`SeismicEvm`].
+    pub fn new(
+        inner: seismic_revm::SeismicEvm<
+            SeismicContext<DB>,
+            I,
+            SeismicInstructions<EthInterpreter, SeismicContext<DB>>,
+            P,
+        >,
+        inspect: bool,
+    ) -> Self {
+        Self { inner, inspect }
+    }
+}
+
+impl<DB: Database, I, P> Deref for SeismicEvm<DB, I, P> {
+    type Target = SeismicContext<DB>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -78,33 +92,33 @@ impl<DB: Database, I, P> Deref for OpEvm<DB, I, P> {
     }
 }
 
-impl<DB: Database, I, P> DerefMut for OpEvm<DB, I, P> {
+impl<DB: Database, I, P> DerefMut for SeismicEvm<DB, I, P> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.ctx_mut()
     }
 }
 
-impl<DB, I, P> Evm for OpEvm<DB, I, P>
+impl<DB, I, P> Evm for SeismicEvm<DB, I, P>
 where
     DB: Database,
-    I: Inspector<OpContext<DB>>,
-    P: PrecompileProvider<OpContext<DB>, Output = InterpreterResult>,
+    I: Inspector<SeismicContext<DB>>,
+    P: PrecompileProvider<SeismicContext<DB>, Output = InterpreterResult>,
 {
     type DB = DB;
-    type Tx = OpTransaction<TxEnv>;
-    type Error = EVMError<DB::Error, OpTransactionError>;
-    type HaltReason = OpHaltReason;
-    type Spec = OpSpecId;
+    type Tx = SeismicTransaction<TxEnv>;
+    type Error = EVMError<DB::Error>;
+    type HaltReason = SeismicHaltReason;
+    type Spec = SeismicSpecId;
     type Precompiles = P;
     type Inspector = I;
 
-    fn block(&self) -> &BlockEnv {
-        &self.block
-    }
-
     fn chain_id(&self) -> u64 {
         self.cfg.chain_id
+    }
+
+    fn block(&self) -> &BlockEnv {
+        self.inner.0.block()
     }
 
     fn transact_raw(
@@ -119,13 +133,20 @@ where
         }
     }
 
+    fn transact(
+        &mut self,
+        tx: impl IntoTxEnv<Self::Tx>,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        self.transact_raw(tx.into_tx_env())
+    }
+
     fn transact_system_call(
         &mut self,
         caller: Address,
         contract: Address,
         data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        let tx = OpTransaction {
+        let tx = SeismicTransaction {
             base: TxEnv {
                 caller,
                 kind: TxKind::Call(contract),
@@ -147,13 +168,11 @@ where
                 // blob fields can be None for this tx
                 blob_hashes: Vec::new(),
                 max_fee_per_blob_gas: 0,
-                tx_type: OpTxType::Deposit as u8,
+                tx_type: 0,
                 authorization_list: Default::default(),
             },
-            // The L1 fee is not charged for the EIP-4788 transaction, submit zero bytes for the
-            // enveloped tx size.
-            enveloped_tx: Some(Bytes::default()),
-            deposit: Default::default(),
+            tx_hash: Default::default(),
+            rng_mode: RngMode::Execution,
         };
 
         let mut gas_limit = tx.base.gas_limit;
@@ -220,36 +239,46 @@ where
     }
 }
 
-/// Factory producing [`OpEvm`]s.
-#[derive(Debug, Default, Clone, Copy)]
+/// Factory producing [`SeismicEvm`]s.
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OpEvmFactory;
+// Adding the enclave client here,
+// given the enclave related information gets fed at EVM creation in the chain object.
+// Wiring still TODO
+pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
+    #[allow(dead_code)]
+    enclave_client: Arc<T::Client>,
+}
 
-impl EvmFactory for OpEvmFactory {
-    type Evm<DB: Database, I: Inspector<OpContext<DB>>> = OpEvm<DB, I, Self::Precompiles<DB>>;
-    type Context<DB: Database> = OpContext<DB>;
-    type Tx = OpTransaction<TxEnv>;
+impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
+    /// Creates a new [`SeismicEvmFactory`].
+    pub fn new(enclave_client_builder: T) -> Self {
+        let enclave_client = enclave_client_builder.build();
+        Self { enclave_client: Arc::new(enclave_client) }
+    }
+}
+
+impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
+    type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
+    type Context<DB: Database> = SeismicContext<DB>;
+    type Tx = SeismicTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> =
-        EVMError<DBError, OpTransactionError>;
-    type HaltReason = OpHaltReason;
-    type Spec = OpSpecId;
-    type Precompiles<DB: Database> = PrecompilesMap;
+        EVMError<DBError, InvalidTransaction>;
+    type HaltReason = SeismicHaltReason;
+    type Spec = SeismicSpecId;
+    type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
-        input: EvmEnv<OpSpecId>,
+        input: EvmEnv<SeismicSpecId>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        let spec_id = input.cfg_env.spec;
-        OpEvm {
-            inner: Context::op()
+        SeismicEvm {
+            inner: Context::seismic()
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_op_with_inspector(NoOpInspector {})
-                .with_precompiles(PrecompilesMap::from_static(
-                    OpPrecompiles::new_with_spec(spec_id).precompiles(),
-                )),
+                .build_seismic_evm_with_inspector(NoOpInspector {}),
             inspect: false,
         }
     }
@@ -257,19 +286,15 @@ impl EvmFactory for OpEvmFactory {
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
         &self,
         db: DB,
-        input: EvmEnv<OpSpecId>,
+        input: EvmEnv<SeismicSpecId>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        let spec_id = input.cfg_env.spec;
-        OpEvm {
-            inner: Context::op()
+        SeismicEvm {
+            inner: Context::seismic()
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_op_with_inspector(inspector)
-                .with_precompiles(PrecompilesMap::from_static(
-                    OpPrecompiles::new_with_spec(spec_id).precompiles(),
-                )),
+                .build_seismic_evm_with_inspector(inspector),
             inspect: true,
         }
     }

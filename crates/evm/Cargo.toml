@@ -20,13 +20,16 @@ alloy-sol-types.workspace = true
 alloy-eips.workspace = true
 alloy-hardforks.workspace = true
 
+seismic-revm = { workspace = true }
 revm.workspace = true
 op-revm = { workspace = true, optional = true }
 op-alloy-consensus = { workspace = true, optional = true }
+seismic-alloy-consensus.workspace = true
 
 auto_impl.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
+
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
@@ -39,6 +42,7 @@ secp256k1 = [
     "alloy-consensus/secp256k1",
 ]
 std = [
+	"seismic-revm/std",
     "alloy-primitives/std",
     "revm/std",
     "alloy-consensus/std",
