@@ -382,7 +382,6 @@ mod tests {
     // Expected behavior for now is panic as MockClient panics on bad encryption/decryption
     // This test case may need to be updated if the MockClient is changed to return
     #[test]
-    #[should_panic]
     fn test_incorrect_encryption() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
@@ -400,10 +399,7 @@ mod tests {
 
         let rng = &mut rand::thread_rng();
         let wrong_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &SecretKey::new(rng));
-        println!("wrong_pubkey:            {:?}", wrong_pubkey);
-        println!("setup.encryption_pubkey: {:?}", tx_seismic.seismic_elements.encryption_pubkey);
         tx_seismic.seismic_elements.encryption_pubkey = wrong_pubkey;
-        println!("setup.encryption_pubkey: {:?}", tx_seismic.seismic_elements.encryption_pubkey);
         let tx_envelope = get_tx_envelope(&setup, tx_seismic);
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
