@@ -73,18 +73,18 @@ serde_json = "1"
 seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "3749534" }
 
 # alloy-core
-alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
-alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
-alloy-json-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
-alloy-sol-macro-expander = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
-alloy-sol-macro-input = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
-alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
-alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "5690e21" }
+alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-json-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-sol-macro-expander = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-sol-macro-input = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
 
 # alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "34353d4" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "d2aa119" }
 
 # revm
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "5e305bd7"}
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "5e305bd7"}
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "5e305bd7"}
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "e7fa9fab"}
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "e7fa9fab"}
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "e7fa9fab"}
