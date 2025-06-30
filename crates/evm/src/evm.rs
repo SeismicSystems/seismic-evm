@@ -2,7 +2,7 @@
 
 use crate::{EvmEnv, EvmError, IntoTxEnv};
 use alloy_primitives::{Address, Bytes};
-use core::{error::Error, fmt::Debug};
+use core::{error::Error, fmt::Debug, hash::Hash};
 use revm::{
     context::{result::ExecutionResult, BlockEnv},
     context_interface::{
@@ -41,10 +41,17 @@ pub trait Evm {
     type HaltReason: HaltReasonTr + Send + Sync + 'static;
     /// Identifier of the EVM specification. EVM is expected to use this identifier to determine
     /// which features are enabled.
-    type Spec: Debug + Copy + Send + Sync + 'static;
+    type Spec: Debug + Copy + Hash + Eq + Send + Sync + Default + 'static;
+    /// Precompiles used by the EVM.
+    type Precompiles;
+    /// Evm inspector.
+    type Inspector;
 
     /// Reference to [`BlockEnv`].
     fn block(&self) -> &BlockEnv;
+
+    /// Returns the chain ID of the environment.
+    fn chain_id(&self) -> u64;
 
     /// Executes a transaction and returns the outcome.
     fn transact_raw(
@@ -129,6 +136,18 @@ pub trait Evm {
     fn disable_inspector(&mut self) {
         self.set_inspector_enabled(false)
     }
+
+    /// Getter of precompiles.
+    fn precompiles(&self) -> &Self::Precompiles;
+
+    /// Mutable getter of precompiles.
+    fn precompiles_mut(&mut self) -> &mut Self::Precompiles;
+
+    /// Getter of inspector.
+    fn inspector(&self) -> &Self::Inspector;
+
+    /// Mutable getter of inspector.
+    fn inspector_mut(&mut self) -> &mut Self::Inspector;
 }
 
 /// A type responsible for creating instances of an ethereum virtual machine given a certain input.
@@ -140,6 +159,8 @@ pub trait EvmFactory {
         HaltReason = Self::HaltReason,
         Error = Self::Error<DB::Error>,
         Spec = Self::Spec,
+        Precompiles = Self::Precompiles,
+        Inspector = I,
     >;
 
     /// The EVM context for inspectors
@@ -151,7 +172,9 @@ pub trait EvmFactory {
     /// Halt reason. See [`Evm::HaltReason`].
     type HaltReason: HaltReasonTr + Send + Sync + 'static;
     /// The EVM specification identifier, see [`Evm::Spec`].
-    type Spec: Debug + Copy + Send + Sync + 'static;
+    type Spec: Debug + Copy + Hash + Eq + Send + Sync + Default + 'static;
+    /// Precompiles used by the EVM.
+    type Precompiles;
 
     /// Creates a new instance of an EVM.
     fn create_evm<DB: Database>(
