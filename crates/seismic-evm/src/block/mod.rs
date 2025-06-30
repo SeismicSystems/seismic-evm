@@ -245,8 +245,7 @@ mod tests {
     };
     use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
     use seismic_enclave::{
-        nonce::Nonce, rand, tx_io::IoEncryptionRequest, MockEnclaveClientBuilder, PublicKey,
-        Secp256k1, SecretKey,
+        rand, MockEnclaveClientBuilder, Nonce, PublicKey, Secp256k1, SecretKey,
     };
     use seismic_revm::SeismicSpecId;
 
@@ -336,17 +335,18 @@ mod tests {
     }
 
     fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
-        let ciphertext = setup
+        let enclave_client = setup
             .enclave_builder
             .clone()
-            .build()
-            .encrypt(IoEncryptionRequest {
-                key: setup.encryption_pubkey,
-                data: plaintext.as_bytes().to_vec(),
-                nonce: setup.encryption_nonce.clone(),
-            })
-            .unwrap()
-            .encrypted_data;
+            .build(); 
+        
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+        };
+        let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
+        let ciphertext = seismic_elements.server_encrypt(&enclave_client, &pt_bytes).unwrap();
         TxSeismic {
             chain_id: 5124,
             nonce: 0,
@@ -355,11 +355,7 @@ mod tests {
             to: TxKind::Call(Address::ZERO),
             value: U256::from(0),
             input: Bytes::from(ciphertext),
-            seismic_elements: TxSeismicElements {
-                encryption_pubkey: setup.encryption_pubkey,
-                encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
-                message_version: 0,
-            },
+            seismic_elements,
         }
     }
 
@@ -404,7 +400,10 @@ mod tests {
 
         let rng = &mut rand::thread_rng();
         let wrong_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &SecretKey::new(rng));
+        println!("wrong_pubkey:            {:?}", wrong_pubkey);
+        println!("setup.encryption_pubkey: {:?}", tx_seismic.seismic_elements.encryption_pubkey);
         tx_seismic.seismic_elements.encryption_pubkey = wrong_pubkey;
+        println!("setup.encryption_pubkey: {:?}", tx_seismic.seismic_elements.encryption_pubkey);
         let tx_envelope = get_tx_envelope(&setup, tx_seismic);
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
