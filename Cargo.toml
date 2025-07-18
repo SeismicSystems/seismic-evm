@@ -54,7 +54,7 @@ alloy-op-hardforks = { version = "0.2" }
 op-alloy-consensus = { version = "0.16", default-features = false }
 
 # seismic-alloy
-seismic-alloy-consensus = { version = "0.0.1", default-features = false }
+seismic-alloy-consensus = { version = "1.0", default-features = false }
 
 # revm
 revm = { version = "23.1.0", default-features = false }
@@ -87,4 +87,4 @@ op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "4
 seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "4ee533d4"}
 
 # alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "dddd920" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "c54ebc9877d6cdf555f0b09135dcde445b6b1998" }
