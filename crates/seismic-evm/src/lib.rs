@@ -268,6 +268,8 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
         rng_keypair: Option<schnorrkel::Keypair>,
     ) -> SeismicEvm<DB, NoOpInspector> {
         let live_key = rng_keypair.or_else(|| self.get_live_rng_key());
+        println!("##############################");
+        println!("live_key: {:?}", live_key);
         
         let context = self.create_context_with_rng_key(live_key);
 
