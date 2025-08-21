@@ -16,6 +16,7 @@ use revm::{
         result::{EVMError, ResultAndState},
         ContextTr,
     },
+    database_interface::EmptyDB,
     handler::PrecompileProvider,
     inspector::NoOpInspector,
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
@@ -26,7 +27,7 @@ use seismic_revm::{
     instructions::instruction_provider::SeismicInstructions,
     precompiles::SeismicPrecompiles,
     transaction::abstraction::{RngMode, SeismicTransaction},
-    DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
+    SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
 use std::sync::Arc;
 
@@ -245,11 +246,9 @@ where
 /// Factory producing [`SeismicEvm`]s.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-// Adding the enclave client here,
-// given the enclave related information gets fed at EVM creation in the chain object.
-// Wiring still TODO
+// Enclave client used to fetch live RNG keys during EVM creation.
+// The live key gets wired into SeismicChain for Execute mode transactions.
 pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
-    #[allow(dead_code)]
     enclave_client: Arc<T::Client>,
 }
 
@@ -258,6 +257,74 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     pub fn new(enclave_client_builder: T) -> Self {
         let enclave_client = enclave_client_builder.build();
         Self { enclave_client: Arc::new(enclave_client) }
+    }
+
+    /// Create an EVM with an optional RNG keypair.
+    /// If no keypair is provided, attempts to get the live RNG key from the enclave for Execute mode.
+    pub fn create_evm_with_rng_key<DB: Database>(
+        &self,
+        db: DB,
+        input: EvmEnv<SeismicSpecId>,
+        rng_keypair: Option<schnorrkel::Keypair>,
+    ) -> SeismicEvm<DB, NoOpInspector> {
+        let live_key = rng_keypair.or_else(|| self.get_live_rng_key());
+        
+        let context = self.create_context_with_rng_key(live_key);
+
+        SeismicEvm {
+            inner: context
+                .with_db(db)
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .build_seismic_evm_with_inspector(NoOpInspector {}),
+            inspect: false,
+        }
+    }
+
+    /// Get the live RNG key from the enclave client
+    fn get_live_rng_key(&self) -> Option<schnorrkel::Keypair> {
+        use seismic_enclave::{keys::GetPurposeKeysRequest, rpc::SyncEnclaveApiClient};
+        
+        // Epochs are not yet implemented, so we always use 0
+        let request = GetPurposeKeysRequest { epoch: 0 };
+        
+        // Try to get the live RNG key from the enclave
+        match self.enclave_client.get_purpose_keys(request) {
+            Ok(response) => Some(response.rng_keypair),
+            Err(_) => None, // Fall back to default key when enclave not available
+        }
+    }
+
+    /// Create SeismicContext with appropriate RNG key
+    fn create_context_with_rng_key(&self, live_key: Option<schnorrkel::Keypair>) -> SeismicContext<EmptyDB> {
+        use seismic_revm::DefaultSeismicContext;
+        
+        match live_key {
+            Some(keypair) => SeismicContext::seismic_with_rng_key(keypair),
+            None => SeismicContext::seismic(),
+        }
+    }
+
+    /// Create an EVM with inspector and optional RNG keypair.
+    pub fn create_evm_with_inspector_and_rng_key<DB: Database, I: Inspector<SeismicContext<DB>>>(
+        &self,
+        db: DB,
+        input: EvmEnv<SeismicSpecId>,
+        inspector: I,
+        rng_keypair: Option<schnorrkel::Keypair>,
+    ) -> SeismicEvm<DB, I> {
+        let live_key = rng_keypair.or_else(|| self.get_live_rng_key());
+        
+        let context = self.create_context_with_rng_key(live_key);
+
+        SeismicEvm {
+            inner: context
+                .with_db(db)
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .build_seismic_evm_with_inspector(inspector),
+            inspect: true,
+        }
     }
 }
 
@@ -276,14 +343,7 @@ impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
         db: DB,
         input: EvmEnv<SeismicSpecId>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        SeismicEvm {
-            inner: Context::seismic()
-                .with_db(db)
-                .with_block(input.block_env)
-                .with_cfg(input.cfg_env)
-                .build_seismic_evm_with_inspector(NoOpInspector {}),
-            inspect: false,
-        }
+        self.create_evm_with_rng_key(db, input, None)
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
@@ -292,13 +352,6 @@ impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
         input: EvmEnv<SeismicSpecId>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        SeismicEvm {
-            inner: Context::seismic()
-                .with_db(db)
-                .with_block(input.block_env)
-                .with_cfg(input.cfg_env)
-                .build_seismic_evm_with_inspector(inspector),
-            inspect: true,
-        }
+        self.create_evm_with_inspector_and_rng_key(db, input, inspector, None)
     }
 }
