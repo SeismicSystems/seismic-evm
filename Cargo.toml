@@ -71,7 +71,7 @@ serde_json = "1"
 
 [patch.crates-io]
 # enclave
-seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "a347832" }
+seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "12bf284" }
 
 # alloy-core
 alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
@@ -86,9 +86,6 @@ alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy
 seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "c0e56e6" }
 
 # revm
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", branch = "m/rng-key" }
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", branch = "m/rng-key" }
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", branch = "m/rng-key" }
-#revm = { path = "../seismic-revm/crates/revm" }
-#op-revm = { path = "../seismic-revm/crates/op-revm" }
-#seismic-revm = { path = "../seismic-revm/crates/seismic" }
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "91385c1" }
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "91385c1" }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "91385c1" }
