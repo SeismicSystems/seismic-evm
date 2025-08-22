@@ -246,7 +246,8 @@ where
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 // Factory that creates SeismicEVMs with a pre-fetched RNG key.
-// The live key is provided by SeismicEvmConfig and gets wired into SeismicChain for Execute mode transactions.
+// The live key is provided by SeismicEvmConfig and gets wired into SeismicChain for Execute mode
+// transactions.
 pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
     live_rng_key: Option<schnorrkel::Keypair>,
     _phantom: std::marker::PhantomData<T>,
@@ -260,12 +261,10 @@ impl<T: SyncEnclaveApiClientBuilder> Default for SeismicEvmFactory<T> {
 
 impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     /// Creates a new [`SeismicEvmFactory`] with a pre-fetched RNG key.
-    /// This is the preferred constructor when the RNG key is managed at a higher level (e.g., SeismicEvmConfig).
+    /// This is the preferred constructor when the RNG key is managed at a higher level (e.g.,
+    /// SeismicEvmConfig).
     pub fn new_with_rng_key(live_rng_key: Option<schnorrkel::Keypair>) -> Self {
-        Self { 
-            live_rng_key,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { live_rng_key, _phantom: std::marker::PhantomData }
     }
 
     /// Creates a new [`SeismicEvmFactory`] with enclave client (legacy compatibility).
@@ -278,11 +277,13 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     }
 
     /// Get the live RNG key from an enclave client
-    fn get_live_rng_key_from_enclave_client(enclave_client: &T::Client) -> Option<schnorrkel::Keypair> {
+    fn get_live_rng_key_from_enclave_client(
+        enclave_client: &T::Client,
+    ) -> Option<schnorrkel::Keypair> {
         use seismic_enclave::{keys::GetPurposeKeysRequest, rpc::SyncEnclaveApiClient};
-        
+
         let request = GetPurposeKeysRequest { epoch: 0 };
-        
+
         match enclave_client.get_purpose_keys(request) {
             Ok(response) => Some(response.rng_keypair),
             Err(_) => None,
@@ -298,7 +299,7 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
         rng_keypair: Option<schnorrkel::Keypair>,
     ) -> SeismicEvm<DB, NoOpInspector> {
         let live_key = rng_keypair.or_else(|| self.live_rng_key.clone());
-        
+
         let context = self.create_context_with_rng_key(live_key);
 
         SeismicEvm {
@@ -311,11 +312,13 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
         }
     }
 
-
     /// Create SeismicContext with appropriate RNG key
-    fn create_context_with_rng_key(&self, live_key: Option<schnorrkel::Keypair>) -> SeismicContext<EmptyDB> {
+    fn create_context_with_rng_key(
+        &self,
+        live_key: Option<schnorrkel::Keypair>,
+    ) -> SeismicContext<EmptyDB> {
         use seismic_revm::DefaultSeismicContext;
-        
+
         match live_key {
             Some(keypair) => SeismicContext::seismic_with_rng_key(keypair),
             None => SeismicContext::seismic(),
@@ -331,7 +334,7 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
         rng_keypair: Option<schnorrkel::Keypair>,
     ) -> SeismicEvm<DB, I> {
         let live_key = rng_keypair.or_else(|| self.live_rng_key.clone());
-        
+
         let context = self.create_context_with_rng_key(live_key);
 
         SeismicEvm {
