@@ -97,7 +97,7 @@ where
         &mut self,
         address: Address,
         index: StorageKey,
-    ) -> Result<StorageValue, Self::Error> {
+    ) -> Result<alloy_primitives::FlaggedStorage, Self::Error> {
         self.0.db_mut().storage(address, index).map_err(ErasedError::new)
     }
 

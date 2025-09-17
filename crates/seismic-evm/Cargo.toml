@@ -25,7 +25,7 @@ alloy-eips.workspace = true
 revm.workspace = true
 
 # seismic
-seismic-revm = {workspace = true, features = ["secp256k1"]}
+seismic-revm.workspace = true
 seismic-enclave.workspace = true
 seismic-alloy-consensus = { workspace = true, features = ["std", "serde"] }
 
