@@ -5,11 +5,272 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1](https://github.com/alloy-rs/evm/releases/tag/v0.20.1) - 2025-08-26
+
+### Dependencies
+
+- Bump hardforks
+
+## [0.20.0](https://github.com/alloy-rs/evm/releases/tag/v0.20.0) - 2025-08-26
+
+### Features
+
+- Expose `PrecompileId` ([#165](https://github.com/alloy-rs/evm/issues/165))
+- Expose target/bytecode addresses on `PrecompileInput` ([#161](https://github.com/alloy-rs/evm/issues/161))
+
+### Miscellaneous Tasks
+
+- Release 0.20.0
+
+## [0.19.0](https://github.com/alloy-rs/evm/releases/tag/v0.19.0) - 2025-08-25
+
+### Dependencies
+
+- Bump op-alloy019 ([#159](https://github.com/alloy-rs/evm/issues/159))
+- [deps] Bump revm 29 ([#158](https://github.com/alloy-rs/evm/issues/158))
+
+### Miscellaneous Tasks
+
+- Release 0.19.0
+
+## [0.18.4](https://github.com/alloy-rs/evm/releases/tag/v0.18.4) - 2025-08-23
+
+### Features
+
+- [eth] Introduce EthEvmBuilder for unified EthEvm instance creation ([#155](https://github.com/alloy-rs/evm/issues/155))
+
+### Miscellaneous Tasks
+
+- Release 0.18.4
+
+## [0.18.3](https://github.com/alloy-rs/evm/releases/tag/v0.18.3) - 2025-08-15
+
+### Miscellaneous Tasks
+
+- Release 0.18.3
+- Update `EvmInternals::new()` to pub ([#156](https://github.com/alloy-rs/evm/issues/156))
+
+## [0.18.2](https://github.com/alloy-rs/evm/releases/tag/v0.18.2) - 2025-08-15
+
+### Features
+
+- Add map_pure_precompiles to respect pure precompiles for caching ([#153](https://github.com/alloy-rs/evm/issues/153))
+
+### Miscellaneous Tasks
+
+- Release 0.18.2
+
+## [0.18.1](https://github.com/alloy-rs/evm/releases/tag/v0.18.1) - 2025-08-12
+
+### Miscellaneous Tasks
+
+- Release 0.18.1
+
+## [0.18.0](https://github.com/alloy-rs/evm/releases/tag/v0.18.0) - 2025-08-12
+
+### Dependencies
+
+- [deps] Bump revm 28.0.0, msrv 1.88 required for revm ([#152](https://github.com/alloy-rs/evm/issues/152))
+
+### Miscellaneous Tasks
+
+- Release 0.18.0
+
+## [0.17.0](https://github.com/alloy-rs/evm/releases/tag/v0.17.0) - 2025-08-05
+
+### Features
+
+- `ToTxEnv` ([#148](https://github.com/alloy-rs/evm/issues/148))
+
+### Miscellaneous Tasks
+
+- Release 0.17.0
+- Add into_dyn_precompiles ([#150](https://github.com/alloy-rs/evm/issues/150))
+
+## [0.16.2](https://github.com/alloy-rs/evm/releases/tag/v0.16.2) - 2025-07-30
+
+### Features
+
+- More impls for `Either` ([#147](https://github.com/alloy-rs/evm/issues/147))
+
+### Miscellaneous Tasks
+
+- Release 0.16.2
+
+## [0.16.1](https://github.com/alloy-rs/evm/releases/tag/v0.16.1) - 2025-07-28
+
+### Bug Fixes
+
+- Handle precompile reverts in `PrecompilesMap` ([#144](https://github.com/alloy-rs/evm/issues/144))
+
+### Miscellaneous Tasks
+
+- Release 0.16.1
+
+## [0.16.0](https://github.com/alloy-rs/evm/releases/tag/v0.16.0) - 2025-07-27
+
+### Dependencies
+
+- Bump msrv ([#142](https://github.com/alloy-rs/evm/issues/142))
+- Bump revm2710 ([#141](https://github.com/alloy-rs/evm/issues/141))
+
+### Features
+
+- Add as_invalid_tx_err in InvalidTxError ([#143](https://github.com/alloy-rs/evm/issues/143))
+
+### Miscellaneous Tasks
+
+- Release 0.16.0
+
+## [0.15.0](https://github.com/alloy-rs/evm/releases/tag/v0.15.0) - 2025-07-21
+
+### Dependencies
+
+- Bump revm 2703 ([#133](https://github.com/alloy-rs/evm/issues/133))
+
+### Features
+
+- Add Any bound and as_any method to InvalidTxError trait ([#128](https://github.com/alloy-rs/evm/issues/128))
+- Enhance precompile lookup documentation and functionality ([#137](https://github.com/alloy-rs/evm/issues/137))
+- `EvmInternals::log` ([#135](https://github.com/alloy-rs/evm/issues/135))
+- Make fusing optional in `TxTracer` ([#131](https://github.com/alloy-rs/evm/issues/131))
+- Add is_pure method to Precompile trait ([#126](https://github.com/alloy-rs/evm/issues/126))
+
+### Miscellaneous Tasks
+
+- Release 0.15.0
+- Convert PrecompilesMap into struct ([#136](https://github.com/alloy-rs/evm/issues/136))
+- Use revm system_call ([#121](https://github.com/alloy-rs/evm/issues/121))
+- Reorder struct def ([#129](https://github.com/alloy-rs/evm/issues/129))
+
+### Performance
+
+- Allocate capacity for balance changes ([#139](https://github.com/alloy-rs/evm/issues/139))
+- Only fuse inspector once ([#134](https://github.com/alloy-rs/evm/issues/134))
+
+## [0.14.0](https://github.com/alloy-rs/evm/releases/tag/v0.14.0) - 2025-07-03
+
+### Dependencies
+
+- Bump revm 27.0.2 ([#124](https://github.com/alloy-rs/evm/issues/124))
+
+### Features
+
+- Add BlockEnv to EvmInternals ([#123](https://github.com/alloy-rs/evm/issues/123))
+
+### Miscellaneous Tasks
+
+- Release 0.14.0
+
+## [0.13.0](https://github.com/alloy-rs/evm/releases/tag/v0.13.0) - 2025-07-01
+
+### Dependencies
+
+- Bump revm ([#122](https://github.com/alloy-rs/evm/issues/122))
+
+### Features
+
+- Add object-safe EvmInternals trait for journal operations ([#118](https://github.com/alloy-rs/evm/issues/118))
+- Add builder-style methods for precompile manipulation ([#120](https://github.com/alloy-rs/evm/issues/120))
+- Add setter utils to blockenv ([#116](https://github.com/alloy-rs/evm/issues/116))
+
+### Miscellaneous Tasks
+
+- Release 0.13.0
+- Add some DynPrompile impls ([#117](https://github.com/alloy-rs/evm/issues/117))
+
+## [0.12.3](https://github.com/alloy-rs/evm/releases/tag/v0.12.3) - 2025-06-24
+
+### Bug Fixes
+
+- `the trait bound `[u8]: AsRef<[_; 0]>` is not satisfied` in `precompiles` ([#114](https://github.com/alloy-rs/evm/issues/114))
+
+### Miscellaneous Tasks
+
+- Release 0.12.3
+
+## [0.12.2](https://github.com/alloy-rs/evm/releases/tag/v0.12.2) - 2025-06-23
+
+### Documentation
+
+- Fix typo in tracing.rs comment ([#113](https://github.com/alloy-rs/evm/issues/113))
+- Correct spelling of "commit" in comments ([#112](https://github.com/alloy-rs/evm/issues/112))
+
+### Features
+
+- Add call-util feature with caller_gas_allowance ([#111](https://github.com/alloy-rs/evm/issues/111))
+
+### Miscellaneous Tasks
+
+- Release 0.12.2
+- Derive Copy for `PrecompileInput` ([#110](https://github.com/alloy-rs/evm/issues/110))
+
+## [0.12.1](https://github.com/alloy-rs/evm/releases/tag/v0.12.1) - 2025-06-20
+
+### Bug Fixes
+
+- Fix compilation
+
+### Miscellaneous Tasks
+
+- Release 0.12.1
+
+## [0.12.0](https://github.com/alloy-rs/evm/releases/tag/v0.12.0) - 2025-06-20
+
+### Dependencies
+
+- Bump revm 25 ([#100](https://github.com/alloy-rs/evm/issues/100))
+
+### Documentation
+
+- Improve apply_precompile documentation ([#106](https://github.com/alloy-rs/evm/issues/106))
+- Improve BlockExecutorFactory and ExecutionCtx documentation ([#104](https://github.com/alloy-rs/evm/issues/104))
+- Improve transaction trait documentation ([#103](https://github.com/alloy-rs/evm/issues/103))
+
+### Features
+
+- Add RPC utilities for block and state overrides ([#108](https://github.com/alloy-rs/evm/issues/108))
+- Provide more context to `Precompile::call` ([#109](https://github.com/alloy-rs/evm/issues/109))
+
+### Miscellaneous Tasks
+
+- Release 0.12.0
+
+## [0.11.0](https://github.com/alloy-rs/evm/releases/tag/v0.11.0) - 2025-06-11
+
+### Features
+
+- Tracing helpers ([#89](https://github.com/alloy-rs/evm/issues/89))
+
+### Miscellaneous Tasks
+
+- Release 0.11.0
+- Update `op-alloy-consensus` ([#101](https://github.com/alloy-rs/evm/issues/101))
+
+## [0.10.0](https://github.com/alloy-rs/evm/releases/tag/v0.10.0) - 2025-05-23
+
+### Dependencies
+
+- [`deps`] Bump revm to `24.0.0` and op-revm to `5.0.0` ([#98](https://github.com/alloy-rs/evm/issues/98))
+
+### Features
+
+- Implement from_recovered_tx for txDeposit nativel ([#96](https://github.com/alloy-rs/evm/issues/96))
+
+### Miscellaneous Tasks
+
+- Release 0.10.0
+- Preparing for mint nonoptional in reth ([#91](https://github.com/alloy-rs/evm/issues/91))
+
 ## [0.9.1](https://github.com/alloy-rs/evm/releases/tag/v0.9.1) - 2025-05-20
 
 ### Features
 
 - Implement `FromTxWithEncoded` and `FromRecoveredTx` from `OpTxEnvelope` for `TxEnv` ([#94](https://github.com/alloy-rs/evm/issues/94))
+
+### Miscellaneous Tasks
+
+- Release 0.9.1
 
 ## [0.9.0](https://github.com/alloy-rs/evm/releases/tag/v0.9.0) - 2025-05-20
 

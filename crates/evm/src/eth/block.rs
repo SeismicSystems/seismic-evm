@@ -95,7 +95,7 @@ where
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            self.spec.is_spurious_dragon_active_at_block(self.evm.block().number);
+            self.spec.is_spurious_dragon_active_at_block(self.evm.block().number.saturating_to());
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
         self.system_caller.apply_blockhashes_contract_call(self.ctx.parent_hash, &mut self.evm)?;
@@ -125,7 +125,7 @@ where
         // Execute transaction.
         let ResultAndState { result, state } = self
             .evm
-            .transact(tx)
+            .transact(&tx)
             .map_err(|err| BlockExecutionError::evm(err, tx.tx().trie_hash()))?;
 
         if !f(&result).should_commit() {
@@ -157,7 +157,10 @@ where
     fn finish(
         mut self,
     ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
-        let requests = if self.spec.is_prague_active_at_timestamp(self.evm.block().timestamp) {
+        let requests = if self
+            .spec
+            .is_prague_active_at_timestamp(self.evm.block().timestamp.saturating_to())
+        {
             // Collect all EIP-6110 deposits
             let deposit_requests =
                 eip6110::parse_deposits_from_receipts(&self.spec, &self.receipts)?;
@@ -185,7 +188,7 @@ where
         if self
             .spec
             .ethereum_fork_activation(EthereumHardfork::Dao)
-            .transitions_at_block(self.evm.block().number)
+            .transitions_at_block(self.evm.block().number.saturating_to())
         {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self

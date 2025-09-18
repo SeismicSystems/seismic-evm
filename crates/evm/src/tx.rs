@@ -1,4 +1,8 @@
-//! Abstraction of an executable transaction.
+//! Transaction abstractions for EVM execution.
+//!
+//! This module provides traits and implementations for converting various transaction formats
+//! into a unified transaction environment ([`TxEnv`]) that the EVM can execute. The main purpose
+//! of these traits is to enable flexible transaction input while maintaining type safety.
 
 use alloy_consensus::{
     crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Transaction, TxEip1559,
@@ -19,6 +23,26 @@ use seismic_alloy_consensus::{SeismicTxEnvelope, SEISMIC_TX_TYPE_ID};
 use seismic_revm::{transaction::abstraction::RngMode, SeismicTransaction};
 
 /// Trait marking types that can be converted into a transaction environment.
+///
+/// This is the primary trait that enables flexible transaction input for the EVM. The EVM's
+/// associated type `Evm::Tx` must implement this trait, and the `transact` method accepts
+/// any type implementing [`IntoTxEnv<Evm::Tx>`](IntoTxEnv).
+///
+/// # Example
+///
+/// ```ignore
+/// // Direct TxEnv usage
+/// let tx_env = TxEnv { caller: address, gas_limit: 100_000, ... };
+/// evm.transact(tx_env)?;
+///
+/// // Using a recovered transaction
+/// let recovered = tx.recover_signer()?;
+/// evm.transact(recovered)?;
+///
+/// // Using a transaction with encoded bytes
+/// let with_encoded = WithEncoded::new(recovered, encoded_bytes);
+/// evm.transact(with_encoded)?;
+/// ```
 pub trait IntoTxEnv<TxEnv> {
     /// Converts `self` into [`TxEnv`].
     fn into_tx_env(self) -> TxEnv;
@@ -27,6 +51,36 @@ pub trait IntoTxEnv<TxEnv> {
 impl IntoTxEnv<Self> for TxEnv {
     fn into_tx_env(self) -> Self {
         self
+    }
+}
+
+/// A helper trait to allow implementing [`IntoTxEnv`] for types that build transaction environment
+/// by cloning data.
+#[auto_impl::auto_impl(&)]
+pub trait ToTxEnv<TxEnv> {
+    /// Builds a [`TxEnv`] from `self`.
+    fn to_tx_env(&self) -> TxEnv;
+}
+
+impl<T, TxEnv> IntoTxEnv<TxEnv> for T
+where
+    T: ToTxEnv<TxEnv>,
+{
+    fn into_tx_env(self) -> TxEnv {
+        self.to_tx_env()
+    }
+}
+
+impl<L, R, TxEnv> ToTxEnv<TxEnv> for Either<L, R>
+where
+    L: ToTxEnv<TxEnv>,
+    R: ToTxEnv<TxEnv>,
+{
+    fn to_tx_env(&self) -> TxEnv {
+        match self {
+            Self::Left(l) => l.to_tx_env(),
+            Self::Right(r) => r.to_tx_env(),
+        }
     }
 }
 
@@ -52,9 +106,33 @@ impl IntoTxEnv<TxEnv> for seismic_revm::SeismicTransaction<TxEnv> {
     }
 }
 
-/// Helper user-facing trait to allow implementing [`IntoTxEnv`] on instances of [`Recovered`].
+/// Helper trait for building a transaction environment from a recovered transaction.
+///
+/// This trait enables the conversion of consensus transaction types (which have been recovered
+/// with their sender address) into the EVM's transaction environment. It's automatically used
+/// when a [`Recovered<T>`] type is passed to the EVM's `transact` method.
+///
+/// The expectation is that any recovered consensus transaction can be converted into the
+/// transaction type that the EVM operates on (typically [`TxEnv`]).
+///
+/// # Implementation
+///
+/// This trait is implemented for all standard Ethereum transaction types ([`TxLegacy`],
+/// [`TxEip2930`], [`TxEip1559`], [`TxEip4844`], [`TxEip7702`]) and transaction envelopes
+/// ([`EthereumTxEnvelope`]).
+///
+/// # Example
+///
+/// ```ignore
+/// // Recover the signer from a transaction
+/// let recovered = tx.recover_signer()?;
+///
+/// // The recovered transaction can now be used with the EVM
+/// // This works because Recovered<T> implements IntoTxEnv when T implements FromRecoveredTx
+/// evm.transact(recovered)?;
+/// ```
 pub trait FromRecoveredTx<Tx> {
-    /// Builds a `TxEnv` from a transaction and a sender address.
+    /// Builds a [`TxEnv`] from a transaction and a sender address.
     fn from_recovered_tx(tx: &Tx, sender: Address) -> Self;
 }
 
@@ -67,14 +145,8 @@ where
     }
 }
 
-impl<T, TxEnv: FromRecoveredTx<T>> IntoTxEnv<TxEnv> for Recovered<T> {
-    fn into_tx_env(self) -> TxEnv {
-        IntoTxEnv::into_tx_env(&self)
-    }
-}
-
-impl<T, TxEnv: FromRecoveredTx<T>> IntoTxEnv<TxEnv> for &Recovered<T> {
-    fn into_tx_env(self) -> TxEnv {
+impl<T, TxEnv: FromRecoveredTx<T>> ToTxEnv<TxEnv> for Recovered<T> {
+    fn to_tx_env(&self) -> TxEnv {
         TxEnv::from_recovered_tx(self.inner(), self.signer())
     }
 }
@@ -255,9 +327,9 @@ impl FromTxWithEncoded<TxEip7702> for TxEnv {
     }
 }
 
-/// Helper trait to abstract over different `Recovered<T>` implementations.
+/// Helper trait to abstract over different [`Recovered<T>`] implementations.
 ///
-/// Implemented for `Recovered<T>`, `Recovered<&T>`, `&Recovered<T>`, `&Recovered<&T>`
+/// Implemented for [`Recovered<T>`], `Recovered<&T>`, `&Recovered<T>`, `&Recovered<&T>`
 #[auto_impl::auto_impl(&)]
 pub trait RecoveredTx<T> {
     /// Returns the transaction.
@@ -297,10 +369,58 @@ impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithEncoded<T> {
     }
 }
 
-/// Helper user-facing trait to allow implementing [`IntoTxEnv`] on instances of [`WithEncoded`].
-/// This allows creating transaction environments directly from EIP-2718 encoded bytes.
+impl<L, R, Tx> RecoveredTx<Tx> for Either<L, R>
+where
+    L: RecoveredTx<Tx>,
+    R: RecoveredTx<Tx>,
+{
+    fn tx(&self) -> &Tx {
+        match self {
+            Self::Left(l) => l.tx(),
+            Self::Right(r) => r.tx(),
+        }
+    }
+
+    fn signer(&self) -> &Address {
+        match self {
+            Self::Left(l) => l.signer(),
+            Self::Right(r) => r.signer(),
+        }
+    }
+}
+
+/// Helper trait for building a transaction environment from a transaction with its encoded form.
+///
+/// This trait enables the conversion of consensus transaction types along with their EIP-2718
+/// encoded bytes into the EVM's transaction environment. It's automatically used when a
+/// [`WithEncoded<Recovered<T>>`](WithEncoded) type is passed to the EVM's `transact` method.
+///
+/// The main purpose of this trait is to allow preserving the original encoded transaction data
+/// alongside the parsed transaction, which can be useful for:
+/// - Signature verification
+/// - Transaction hash computation
+/// - Re-encoding for network propagation
+/// - Optimism transaction handling (which requires encoded data, for Data availability costs).
+///
+/// # Implementation
+///
+/// Most implementations simply delegate to [`FromRecoveredTx`], ignoring the encoded bytes.
+/// However, specialized implementations (like Optimism's `OpTransaction`) may use the encoded
+/// data for additional functionality.
+///
+/// # Example
+///
+/// ```ignore
+/// // Create a transaction with its encoded form
+/// let encoded_bytes = tx.encoded_2718();
+/// let recovered = tx.recover_signer()?;
+/// let with_encoded = WithEncoded::new(recovered, encoded_bytes);
+///
+/// // The transaction with encoded data can be used with the EVM
+/// evm.transact(with_encoded)?;
+/// ```
 pub trait FromTxWithEncoded<Tx> {
-    /// Builds a `TxEnv` from a transaction, its sender, and encoded transaction bytes.
+    /// Builds a [`TxEnv`] from a transaction, its sender, and encoded transaction bytes.
     fn from_encoded_tx(tx: &Tx, sender: Address, encoded: Bytes) -> Self;
 }
 
@@ -313,28 +433,15 @@ where
     }
 }
 
-impl<T, TxEnv: FromTxWithEncoded<T>> IntoTxEnv<TxEnv> for WithEncoded<Recovered<T>> {
-    fn into_tx_env(self) -> TxEnv {
+impl<T, TxEnv: FromTxWithEncoded<T>> ToTxEnv<TxEnv> for WithEncoded<Recovered<T>> {
+    fn to_tx_env(&self) -> TxEnv {
         let recovered = &self.1;
         TxEnv::from_encoded_tx(recovered.inner(), recovered.signer(), self.encoded_bytes().clone())
     }
 }
 
-impl<T, TxEnv: FromTxWithEncoded<T>> IntoTxEnv<TxEnv> for &WithEncoded<Recovered<T>> {
-    fn into_tx_env(self) -> TxEnv {
-        let recovered = &self.1;
-        TxEnv::from_encoded_tx(recovered.inner(), recovered.signer(), self.encoded_bytes().clone())
-    }
-}
-
-impl<T, TxEnv: FromTxWithEncoded<T>> IntoTxEnv<TxEnv> for WithEncoded<&Recovered<T>> {
-    fn into_tx_env(self) -> TxEnv {
-        TxEnv::from_encoded_tx(self.value(), *self.value().signer(), self.encoded_bytes().clone())
-    }
-}
-
-impl<T, TxEnv: FromTxWithEncoded<T>> IntoTxEnv<TxEnv> for &WithEncoded<&Recovered<T>> {
-    fn into_tx_env(self) -> TxEnv {
+impl<T, TxEnv: FromTxWithEncoded<T>> ToTxEnv<TxEnv> for WithEncoded<&Recovered<T>> {
+    fn to_tx_env(&self) -> TxEnv {
         TxEnv::from_encoded_tx(self.value(), *self.value().signer(), self.encoded_bytes().clone())
     }
 }
@@ -423,7 +530,7 @@ mod op {
             let deposit = if let OpTxEnvelope::Deposit(tx) = tx {
                 DepositTransactionParts {
                     source_hash: tx.source_hash,
-                    mint: tx.mint,
+                    mint: Some(tx.mint),
                     is_system_transaction: tx.is_system_transaction,
                 }
             } else {

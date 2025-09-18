@@ -3,9 +3,9 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.1"
+version = "0.20.1"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 authors = ["Alloy Contributors"]
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/alloy-rs/alloy-evm"
@@ -36,9 +36,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.dependencies]
 seismic-enclave = "0.1.0"
+seismic-revm = { version = "1.0.0", default-features =  false }
 
-alloy-evm = { version = "0.9.1", path = "crates/evm", default-features = false }
-alloy-op-evm = { version = "0.9.1", path = "crates/op-evm", default-features = false }
+alloy-evm = { version = "0.20.1", path = "crates/evm", default-features = false }
+alloy-op-evm = { version = "0.20.1", path = "crates/op-evm", default-features = false }
 
 # alloy
 alloy-eip2124 = { version = "0.2", default-features = false }
@@ -47,20 +48,19 @@ alloy-eips = { version = "1.0", default-features = false }
 alloy-consensus = { version = "1.0.0", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false }
 alloy-sol-types = { version = "1.0.0", default-features = false }
-alloy-hardforks = { version = "0.2" }
+alloy-hardforks = { version = "0.3" }
+alloy-rpc-types-eth = { version = "1.0.0", default-features = false }
 
 # op-alloy
-alloy-op-hardforks = { version = "0.2" }
-op-alloy-consensus = { version = "0.16", default-features = false }
+alloy-op-hardforks = { version = "0.3" }
+op-alloy-consensus = { version = "0.19", default-features = false }
 
 # seismic-alloy
 seismic-alloy-consensus = { version = "0.0.1", default-features = false }
 
 # revm
-revm = { version = "23.1.0", default-features = false }
-op-revm = { version = "4.0.1", default-features = false }
-seismic-revm = { version = "1.0.0", default-features =  false }
-#seismic-revm = { path = "../seismic-revm/crates/seismic", default-features = false }
+revm = { version = "29.0.0", default-features = false }
+op-revm = { version = "10.0.0", default-features = false }
 
 # misc
 auto_impl = "1"
@@ -74,18 +74,18 @@ serde_json = "1"
 seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "12bf284" }
 
 # alloy-core
-alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
-alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
-alloy-json-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
-alloy-sol-macro-expander = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
-alloy-sol-macro-input = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
-alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
-alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "bc4b5ed" }
+alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
+alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
+alloy-json-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
+alloy-sol-macro-expander = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
+alloy-sol-macro-input = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
+alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
+alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", branch = "usm" }
 
 # alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "c0e56e6" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", branch = "usm" }
 
 # revm
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "91385c1" }
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "91385c1" }
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "91385c1" }
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", branch = "usm" }
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", branch = "usm" }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", branch = "usm" }

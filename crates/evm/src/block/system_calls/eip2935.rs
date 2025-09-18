@@ -28,13 +28,13 @@ pub(crate) fn transact_blockhashes_contract_call<Halt>(
     parent_block_hash: B256,
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    if !spec.is_prague_active_at_timestamp(evm.block().timestamp) {
+    if !spec.is_prague_active_at_timestamp(evm.block().timestamp.saturating_to()) {
         return Ok(None);
     }
 
     // if the block number is zero (genesis block) then no system transaction may occur as per
     // EIP-2935
-    if evm.block().number == 0 {
+    if evm.block().number.is_zero() {
         return Ok(None);
     }
 
