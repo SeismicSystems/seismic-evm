@@ -1,17 +1,26 @@
 //! Abstraction over EVM errors.
 
-use core::error::Error;
+use core::{any::Any, error::Error};
 use revm::context_interface::result::{EVMError, InvalidTransaction};
 
 /// Abstraction over transaction validation error.
-pub trait InvalidTxError: Error + Send + Sync + 'static {
+pub trait InvalidTxError: Error + Send + Sync + Any + 'static {
     /// Returns whether the error cause by transaction having a nonce lower than expected.
     fn is_nonce_too_low(&self) -> bool;
+
+    /// Returns the underlying [`InvalidTransaction`] if any.
+    ///
+    /// This is primarily used for error conversions, e.g. for rpc responses.
+    fn as_invalid_tx_err(&self) -> Option<&InvalidTransaction>;
 }
 
 impl InvalidTxError for InvalidTransaction {
     fn is_nonce_too_low(&self) -> bool {
         matches!(self, Self::NonceTooLow { .. })
+    }
+
+    fn as_invalid_tx_err(&self) -> Option<&InvalidTransaction> {
+        Some(self)
     }
 }
 
@@ -66,5 +75,12 @@ where
 impl InvalidTxError for op_revm::OpTransactionError {
     fn is_nonce_too_low(&self) -> bool {
         matches!(self, Self::Base(tx) if tx.is_nonce_too_low())
+    }
+
+    fn as_invalid_tx_err(&self) -> Option<&InvalidTransaction> {
+        match self {
+            Self::Base(tx) => Some(tx),
+            _ => None,
+        }
     }
 }
