@@ -4,7 +4,7 @@ use crate::{Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, Recov
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use revm::{
-    context::result::ExecutionResult, database::State, inspector::NoOpInspector, Inspector,
+    context::{result::ExecutionResult, BlockEnv, CfgEnv, TxEnv}, database::State, Inspector, Context,
 };
 
 mod error;
@@ -272,7 +272,7 @@ pub trait BlockExecutor {
 
 /// A helper trait encapsulating the constraints on [`BlockExecutor`] produced by the
 /// [`BlockExecutorFactory`] to avoid duplicating them in every implementation.
-pub trait BlockExecutorFor<'a, F: BlockExecutorFactory + ?Sized, DB, I = NoOpInspector>
+pub trait BlockExecutorFor<'a, F: BlockExecutorFactory + ?Sized, DB, I = Box<dyn Inspector<Context<BlockEnv, TxEnv, CfgEnv, DB>>>>
 where
     Self: BlockExecutor<
         Evm = <F::EvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
