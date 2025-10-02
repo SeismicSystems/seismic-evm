@@ -9,7 +9,7 @@ use revm::{
         result::{HaltReasonTr, ResultAndState},
         ContextTr,
     },
-    inspector::{JournalExt, NoOpInspector},
+    inspector::JournalExt,
     DatabaseCommit, Inspector,
 };
 
@@ -222,7 +222,7 @@ pub trait EvmFactory {
         &self,
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
-    ) -> Self::Evm<DB, NoOpInspector>;
+    ) -> Self::Evm<DB, Box<dyn Inspector<Self::Context<DB>>>>;
 
     /// Creates a new instance of an EVM with an inspector.
     ///
