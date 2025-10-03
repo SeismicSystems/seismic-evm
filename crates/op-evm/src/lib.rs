@@ -171,14 +171,16 @@ impl EvmFactory for OpEvmFactory {
         &self,
         db: DB,
         input: EvmEnv<OpSpecId>,
-    ) -> Self::Evm<DB, NoOpInspector> {
+    ) -> Self::Evm<DB, Box<dyn Inspector<Self::Context<DB>>>> {
         let spec_id = input.cfg_env.spec;
         OpEvm {
             inner: Context::op()
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
-                .build_op_with_inspector(NoOpInspector {})
+                .build_op_with_inspector(
+                    Box::new(NoOpInspector {}) as Box<dyn Inspector<OpContext<DB>>>
+                )
                 .with_precompiles(PrecompilesMap::from_static(
                     OpPrecompiles::new_with_spec(spec_id).precompiles(),
                 )),

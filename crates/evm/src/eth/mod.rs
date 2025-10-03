@@ -30,7 +30,8 @@ pub type EthEvmContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
 
 /// Helper builder to construct `EthEvm` instances in a unified way.
 #[derive(Debug)]
-pub struct EthEvmBuilder<DB: Database, I = NoOpInspector> {
+pub struct EthEvmBuilder<DB: Database, I = Box<dyn Inspector<Context<BlockEnv, TxEnv, CfgEnv, DB>>>>
+{
     db: DB,
     block_env: BlockEnv,
     cfg_env: CfgEnv,
@@ -39,14 +40,14 @@ pub struct EthEvmBuilder<DB: Database, I = NoOpInspector> {
     precompiles: Option<PrecompilesMap>,
 }
 
-impl<DB: Database> EthEvmBuilder<DB, NoOpInspector> {
+impl<DB: Database> EthEvmBuilder<DB, Box<dyn Inspector<Context<BlockEnv, TxEnv, CfgEnv, DB>>>> {
     /// Creates a builder from the provided `EvmEnv` and database.
     pub fn new(db: DB, env: EvmEnv) -> Self {
         Self {
             db,
             block_env: env.block_env,
             cfg_env: env.cfg_env,
-            inspector: NoOpInspector {},
+            inspector: Box::new(NoOpInspector {}),
             inspect: false,
             precompiles: None,
         }
@@ -266,7 +267,11 @@ impl EvmFactory for EthEvmFactory {
     type Spec = SpecId;
     type Precompiles<DB: Database> = PrecompilesMap;
 
-    fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
+    fn create_evm<DB: Database>(
+        &self,
+        db: DB,
+        input: EvmEnv,
+    ) -> Self::Evm<DB, Box<dyn Inspector<Self::Context<DB>>>> {
         EthEvmBuilder::new(db, input).build()
     }
 
