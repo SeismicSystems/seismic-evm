@@ -100,7 +100,7 @@ where
         // decrypt
         let plaintext_base = receipt_tx
             .plaintext_copy(&self.enclave_client)
-            .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
+            .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx)?;
 
         // call inner
         let signer = RecoveredTx::signer(&tx);
@@ -120,7 +120,7 @@ where
         // decrypt
         let plaintext_base = receipt_tx
             .plaintext_copy(&self.enclave_client)
-            .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
+            .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx)?;
 
         // call inner
         let signer = RecoveredTx::signer(&tx);
