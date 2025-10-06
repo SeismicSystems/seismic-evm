@@ -335,18 +335,18 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
                     .with_cfg(input.cfg_env)
                     .build_seismic_evm_with_inspector(inspector),
                 inspect: false,
-            }
+            };
         }
         #[cfg(feature = "no-value-transfers")]
         {
             return SeismicEvm {
-            inner: context
-                .with_db(db)
-                .with_block(input.block_env)
-                .with_cfg(input.cfg_env)
-                .build_seismic_evm_with_inspector(inspector),
-            inspect: true,
-        }
+                inner: context
+                    .with_db(db)
+                    .with_block(input.block_env)
+                    .with_cfg(input.cfg_env)
+                    .build_seismic_evm_with_inspector(inspector),
+                inspect: true,
+            };
         }
     }
 
