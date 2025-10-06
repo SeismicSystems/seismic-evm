@@ -322,18 +322,19 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     {
         let live_key = rng_keypair.or_else(|| self.live_rng_key.clone());
         let context = self.create_context_with_rng_key(live_key);
-    
-        #[cfg(not(feature = "no-value-transfers"))] {
-        let inspector = NoOpInspector {};
-        SeismicEvm {
-            inner: context
-                .with_db(db)
-                .with_block(input.block_env)
-                .with_cfg(input.cfg_env)
-                .build_seismic_evm_with_inspector(inspector),
-            inspect: false,
+
+        #[cfg(not(feature = "no-value-transfers"))]
+        {
+            let inspector = NoOpInspector {};
+            SeismicEvm {
+                inner: context
+                    .with_db(db)
+                    .with_block(input.block_env)
+                    .with_cfg(input.cfg_env)
+                    .build_seismic_evm_with_inspector(inspector),
+                inspect: false,
+            }
         }
-    }
         #[cfg(feature = "no-value-transfers")]
         let inspector = NoValueTransferInspector {};
         SeismicEvm {
