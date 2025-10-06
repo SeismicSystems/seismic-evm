@@ -4,6 +4,7 @@ use alloc::{
     string::{String, ToString},
 };
 use alloy_primitives::B256;
+use seismic_alloy_consensus::InputDecryptionElementsError;
 
 /// Block validation error.
 #[derive(Debug, thiserror::Error)]
@@ -145,6 +146,9 @@ pub enum InternalBlockExecutionError {
         /// The EVM error.
         error: Box<dyn core::error::Error + Send + Sync>,
     },
+    /// Unable to decrypt calldata of seismic tx
+    #[error("Failed to decrypt seismic tx: {0}")]
+    FailedToDecryptSeismicTx(InputDecryptionElementsError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync + 'static>),
