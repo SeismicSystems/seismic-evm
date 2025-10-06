@@ -193,6 +193,9 @@ pub trait Evm {
 
 /// A type responsible for creating instances of an ethereum virtual machine given a certain input.
 pub trait EvmFactory {
+    /// The default inspector type for the EVM factory.
+    type DefaultInspector<DB: Database>: Inspector<Self::Context<DB>>;
+
     /// The EVM type that this factory creates.
     type Evm<DB: Database, I: Inspector<Self::Context<DB>>>: Evm<
         DB = DB,
@@ -222,7 +225,7 @@ pub trait EvmFactory {
         &self,
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
-    ) -> Self::Evm<DB, Box<dyn Inspector<Self::Context<DB>>>>;
+    ) -> Self::Evm<DB, Self::DefaultInspector<DB>>;
 
     /// Creates a new instance of an EVM with an inspector.
     ///

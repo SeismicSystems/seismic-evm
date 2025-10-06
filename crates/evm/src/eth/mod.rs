@@ -40,14 +40,14 @@ pub struct EthEvmBuilder<DB: Database, I = Box<dyn Inspector<Context<BlockEnv, T
     precompiles: Option<PrecompilesMap>,
 }
 
-impl<DB: Database> EthEvmBuilder<DB, Box<dyn Inspector<Context<BlockEnv, TxEnv, CfgEnv, DB>>>> {
+impl<DB: Database> EthEvmBuilder<DB, NoOpInspector> {
     /// Creates a builder from the provided `EvmEnv` and database.
     pub fn new(db: DB, env: EvmEnv) -> Self {
         Self {
             db,
             block_env: env.block_env,
             cfg_env: env.cfg_env,
-            inspector: Box::new(NoOpInspector {}),
+            inspector: NoOpInspector {},
             inspect: false,
             precompiles: None,
         }
@@ -266,12 +266,13 @@ impl EvmFactory for EthEvmFactory {
     type HaltReason = HaltReason;
     type Spec = SpecId;
     type Precompiles<DB: Database> = PrecompilesMap;
+    type DefaultInspector<DB: Database> = NoOpInspector;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv,
-    ) -> Self::Evm<DB, Box<dyn Inspector<Self::Context<DB>>>> {
+    ) -> Self::Evm<DB, Self::DefaultInspector<DB>> {
         EthEvmBuilder::new(db, input).build()
     }
 

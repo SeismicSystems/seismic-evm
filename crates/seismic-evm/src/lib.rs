@@ -380,16 +380,20 @@ impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
     type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
     type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
+    #[cfg(not(feature = "no-value-transfers"))]
+    type DefaultInspector<DB: Database> = NoOpInspector;
+    #[cfg(feature = "no-value-transfers")]
+    type DefaultInspector<DB: Database> = NoValueTransferInspector;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
-    ) -> Self::Evm<DB, Box<dyn Inspector<SeismicContext<DB>>>> {
+    ) -> Self::Evm<DB, Self::DefaultInspector<DB>> {
         #[cfg(not(feature = "no-value-transfers"))]
-        let inspector = Box::new(NoOpInspector {});
+        let inspector = NoOpInspector {};
         #[cfg(feature = "no-value-transfers")]
-        let inspector = Box::new(NoValueTransferInspector {});
+        let inspector = NoValueTransferInspector {};
 
         self.create_evm_with_rng_key(db, input, None, inspector)
     }
