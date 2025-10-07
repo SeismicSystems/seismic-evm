@@ -166,12 +166,13 @@ impl EvmFactory for OpEvmFactory {
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
     type Precompiles<DB: Database> = PrecompilesMap;
+    type DefaultInspector<DB: Database> = NoOpInspector;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv<OpSpecId>,
-    ) -> Self::Evm<DB, NoOpInspector> {
+    ) -> Self::Evm<DB, Self::DefaultInspector<DB>> {
         let spec_id = input.cfg_env.spec;
         OpEvm {
             inner: Context::op()

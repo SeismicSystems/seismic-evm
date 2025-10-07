@@ -10,6 +10,7 @@
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
+#[allow(unused_imports)]
 use revm::{
     context::{result::InvalidTransaction, BlockEnv, TxEnv},
     context_interface::{
@@ -29,6 +30,9 @@ use seismic_revm::{
     transaction::abstraction::{RngMode, SeismicTransaction},
     SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
 };
+
+#[cfg(feature = "no-value-transfers")]
+use seismic_revm::NoValueTransferInspector;
 
 pub mod block;
 pub mod hardfork;
@@ -307,23 +311,42 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
 
     /// Create an EVM with an optional RNG keypair.
     /// If no keypair is provided, uses the pre-fetched live RNG key from SeismicEvmConfig.
-    pub fn create_evm_with_rng_key<DB: Database>(
+    pub fn create_evm_with_rng_key<DB>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
         rng_keypair: Option<schnorrkel::Keypair>,
-    ) -> SeismicEvm<DB, NoOpInspector> {
+    ) -> SeismicEvm<DB, <Self as EvmFactory>::DefaultInspector<DB>>
+    where
+        DB: Database,
+    {
         let live_key = rng_keypair.or_else(|| self.live_rng_key.clone());
-
         let context = self.create_context_with_rng_key(live_key);
-
-        SeismicEvm {
-            inner: context
-                .with_db(db)
-                .with_block(input.block_env)
-                .with_cfg(input.cfg_env)
-                .build_seismic_evm_with_inspector(NoOpInspector {}),
-            inspect: false,
+        #[cfg(not(feature = "no-value-transfers"))]
+        let inspector = NoOpInspector {};
+        #[cfg(feature = "no-value-transfers")]
+        let inspector = NoValueTransferInspector {};
+        #[cfg(not(feature = "no-value-transfers"))]
+        {
+            return SeismicEvm {
+                inner: context
+                    .with_db(db)
+                    .with_block(input.block_env)
+                    .with_cfg(input.cfg_env)
+                    .build_seismic_evm_with_inspector(inspector),
+                inspect: false,
+            };
+        }
+        #[cfg(feature = "no-value-transfers")]
+        {
+            return SeismicEvm {
+                inner: context
+                    .with_db(db)
+                    .with_block(input.block_env)
+                    .with_cfg(input.cfg_env)
+                    .build_seismic_evm_with_inspector(inspector),
+                inspect: true,
+            };
         }
     }
 
@@ -372,12 +395,16 @@ impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
     type HaltReason = SeismicHaltReason;
     type Spec = SeismicSpecId;
     type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
+    #[cfg(not(feature = "no-value-transfers"))]
+    type DefaultInspector<DB: Database> = NoOpInspector;
+    #[cfg(feature = "no-value-transfers")]
+    type DefaultInspector<DB: Database> = NoValueTransferInspector;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
-    ) -> Self::Evm<DB, NoOpInspector> {
+    ) -> Self::Evm<DB, Self::DefaultInspector<DB>> {
         self.create_evm_with_rng_key(db, input, None)
     }
 
