@@ -28,7 +28,15 @@ pub(crate) fn transact_blockhashes_contract_call<Halt>(
     parent_block_hash: B256,
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    if !spec.is_prague_active_at_timestamp(evm.block().timestamp.saturating_to()) {
+    // EVM block timestamp is in milliseconds when timestamp-in-seconds feature is disabled
+    // Fork activation checks always use seconds
+    let timestamp_seconds = if cfg!(feature = "timestamp-in-seconds") {
+        evm.block().timestamp.saturating_to()
+    } else {
+        evm.block().timestamp.saturating_to::<u64>() / 1000
+    };
+
+    if !spec.is_prague_active_at_timestamp(timestamp_seconds) {
         return Ok(None);
     }
 
