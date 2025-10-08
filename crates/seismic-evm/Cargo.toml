@@ -38,6 +38,7 @@ k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
 [features]
 default = ["std"]
+timestamp-in-seconds = ["revm/timestamp-in-seconds", "seismic-revm/timestamp-in-seconds", "alloy-evm/timestamp-in-seconds"]
 std = [
 	"alloy-primitives/std",
 	"revm/std",
