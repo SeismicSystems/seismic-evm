@@ -22,7 +22,6 @@ use revm::{
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
     Context, ExecuteEvm, InspectEvm, Inspector,
 };
-use seismic_enclave::rpc::SyncEnclaveApiClientBuilder;
 use seismic_revm::{
     instructions::instruction_provider::SeismicInstructions,
     precompiles::SeismicPrecompiles,
@@ -262,17 +261,16 @@ where
 #[non_exhaustive]
 // Factory that creates SeismicEVMs with pre-fetched purpose keys.
 // The purpose keys are provided at boot time and stored globally.
-pub struct SeismicEvmFactory<T: SyncEnclaveApiClientBuilder> {
+pub struct SeismicEvmFactory {
     purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
-    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
+impl SeismicEvmFactory {
     /// Creates a new [`SeismicEvmFactory`] with pre-fetched purpose keys.
     pub fn new_with_purpose_keys(
         purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
     ) -> Self {
-        Self { purpose_keys, _phantom: std::marker::PhantomData }
+        Self { purpose_keys }
     }
 
     /// Create an EVM using the stored RNG keypair.
@@ -318,7 +316,7 @@ impl<T: SyncEnclaveApiClientBuilder> SeismicEvmFactory<T> {
     }
 }
 
-impl<T: SyncEnclaveApiClientBuilder> EvmFactory for SeismicEvmFactory<T> {
+impl EvmFactory for SeismicEvmFactory {
     type Evm<DB: Database, I: Inspector<SeismicContext<DB>>> = SeismicEvm<DB, I>;
     type Context<DB: Database> = SeismicContext<DB>;
     type Tx = SeismicTransaction<TxEnv>;
