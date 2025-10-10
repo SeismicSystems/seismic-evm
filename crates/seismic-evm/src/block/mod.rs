@@ -148,7 +148,7 @@ where
 pub struct SeismicBlockExecutorFactory<
     R = SeismicAlloyReceiptBuilder,
     Spec = SeismicChainHardforks,
-    EvmFactory = SeismicEvmFactory,
+    EvmFactory = SeismicEvmFactory<seismic_enclave::rpc::MockEnclaveClientBuilder>,
 > {
     /// Receipt builder.
     receipt_builder: R,
