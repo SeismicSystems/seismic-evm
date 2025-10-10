@@ -38,16 +38,16 @@ type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 /// Note that only execute endpoints (e.g. eth_sendRawTransaction) will route through
 /// the block executor, not simulate endpoints (e.g. eth_call, eth_estimateGas).
 #[derive(Debug)]
-pub struct SeismicBlockExecutor<'a, Evm, Spec, R, C>
+pub struct SeismicBlockExecutor<'a, Evm, Spec, R>
 where
     R: ReceiptBuilder,
     R::Receipt: std::fmt::Debug,
 {
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
-    enclave_client: C,
+    purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
 }
 
-impl<'a, E, Spec, R, C> SeismicBlockExecutor<'a, E, Spec, R, C>
+impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
 where
     E: Evm,
     R: ReceiptBuilder,
@@ -60,13 +60,13 @@ where
         ctx: SeismicBlockExecutionCtx<'a>,
         spec: Spec,
         receipt_builder: R,
-        enclave_client: C,
+        purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
     ) -> Self {
-        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), enclave_client }
+        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), purpose_keys }
     }
 }
 
-impl<'db, DB, E, Spec, R, C> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R, C>
+impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
     E: Evm<
@@ -78,7 +78,6 @@ where
         Transaction: Transaction + Encodable2718 + InputDecryptionElements,
         Receipt: TxReceipt<Log = Log>,
     >,
-    C: SyncEnclaveApiClient,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -97,9 +96,9 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt
+        // decrypt using purpose keys
         let plaintext_base = receipt_tx
-            .plaintext_copy(&self.enclave_client)
+            .plaintext_copy(&self.purpose_keys.tx_io_sk)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
         // call inner
@@ -117,9 +116,9 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt
+        // decrypt using purpose keys
         let plaintext_base = receipt_tx
-            .plaintext_copy(&self.enclave_client)
+            .plaintext_copy(&self.purpose_keys.tx_io_sk)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
         // call inner
@@ -146,12 +145,11 @@ where
 }
 
 /// Seismic block executor factory.
-#[derive(Debug, Clone, Default, Copy)]
+#[derive(Debug, Clone)]
 pub struct SeismicBlockExecutorFactory<
-    CB,
     R = SeismicAlloyReceiptBuilder,
     Spec = SeismicChainHardforks,
-    EvmFactory = SeismicEvmFactory<CB>,
+    EvmFactory = SeismicEvmFactory,
 > {
     /// Receipt builder.
     receipt_builder: R,
@@ -159,20 +157,20 @@ pub struct SeismicBlockExecutorFactory<
     spec: Spec,
     /// EVM factory.
     evm_factory: EvmFactory,
-    /// Enclave client.
-    client_builder: CB,
+    /// Purpose keys for decryption.
+    purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
 }
 
-impl<CB, R, Spec, EvmFactory> SeismicBlockExecutorFactory<CB, R, Spec, EvmFactory> {
+impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new [`SeismicBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`SeismicReceiptBuilder`].
     pub const fn new(
         receipt_builder: R,
         spec: Spec,
         evm_factory: EvmFactory,
-        client_builder: CB,
+        purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory, client_builder }
+        Self { receipt_builder, spec, evm_factory, purpose_keys }
     }
 
     /// Exposes the receipt builder.
@@ -190,13 +188,13 @@ impl<CB, R, Spec, EvmFactory> SeismicBlockExecutorFactory<CB, R, Spec, EvmFactor
         &self.evm_factory
     }
 
-    /// Exposes the enclave client builder.
-    pub const fn client_builder(&self) -> &CB {
-        &self.client_builder
+    /// Exposes the purpose keys.
+    pub const fn purpose_keys(&self) -> &'static seismic_enclave::keys::GetPurposeKeysResponse {
+        self.purpose_keys
     }
 }
 
-impl<CB, R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<CB, R, Spec, EvmF>
+impl<R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<R, Spec, EvmF>
 where
     R: ReceiptBuilder<
         Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
@@ -204,7 +202,6 @@ where
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
     EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
-    CB: SyncEnclaveApiClientBuilder + Clone,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -227,8 +224,7 @@ where
         DB: Database + 'a,
         I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
     {
-        let enclave_client = self.client_builder.clone().build();
-        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, enclave_client)
+        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, self.purpose_keys)
     }
 }
 
@@ -278,9 +274,9 @@ mod tests {
     struct SetupTest<'a> {
         signer: Address,
         signing_key: SigningKey,
-        executor_factory: SeismicBlockExecutorFactory<MockEnclaveClientBuilder>,
+        executor_factory: SeismicBlockExecutorFactory,
         ctx: SeismicBlockExecutionCtx<'a>,
-        enclave_builder: MockEnclaveClientBuilder,
+        purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
         encryption_pubkey: PublicKey,
         encryption_nonce: Nonce,
         evm_factory: SeismicEvmFactory<MockEnclaveClientBuilder>,
@@ -296,7 +292,6 @@ mod tests {
         let secp = Secp256k1::new();
         let encryption_pubkey = PublicKey::from_secret_key(&secp, &sk);
 
-        let enclave_builder = MockEnclaveClientBuilder::new();
         // Fetch purpose keys for testing and leak to get 'static lifetime
         let mock_keys = Box::leak(Box::new(seismic_enclave::MockEnclaveServer::get_purpose_keys(
             seismic_enclave::keys::GetPurposeKeysRequest { epoch: 0 },
@@ -308,7 +303,7 @@ mod tests {
             SeismicAlloyReceiptBuilder::default(),
             SeismicChainHardforks::seismic_mainnet(),
             evm_factory.clone(),
-            enclave_builder.clone(),
+            mock_keys,
         );
 
         let ctx = SeismicBlockExecutionCtx {
@@ -323,7 +318,7 @@ mod tests {
             signing_key,
             executor_factory,
             ctx,
-            enclave_builder,
+            purpose_keys: mock_keys,
             encryption_nonce: Nonce::new_rand(),
             evm_factory,
         }
@@ -337,15 +332,21 @@ mod tests {
     }
 
     fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
-        let enclave_client = setup.enclave_builder.clone().build();
-
         let seismic_elements = TxSeismicElements {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
         };
         let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
-        let ciphertext = seismic_elements.server_encrypt(&enclave_client, &pt_bytes).unwrap();
+        // Use the purpose keys directly for encryption
+        use seismic_enclave::ecdh_encrypt;
+        let ciphertext = ecdh_encrypt(
+            &setup.encryption_pubkey,
+            &setup.purpose_keys.tx_io_sk,
+            &pt_bytes,
+            setup.encryption_nonce,
+        )
+        .unwrap();
         TxSeismic {
             chain_id: 5124,
             nonce: 0,
