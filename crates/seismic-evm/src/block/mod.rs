@@ -28,7 +28,6 @@ use alloy_evm::{
 };
 use revm::context::result::ExecutionResult;
 use seismic_alloy_consensus::InputDecryptionElements;
-use seismic_enclave::{client::rpc::SyncEnclaveApiClient, rpc::SyncEnclaveApiClientBuilder};
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
