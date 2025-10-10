@@ -95,7 +95,7 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt using purpose keys
+        // decrypt
         let plaintext_base = receipt_tx
             .plaintext_copy(&self.purpose_keys.tx_io_sk)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
@@ -115,7 +115,7 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt using purpose keys
+        // decrypt
         let plaintext_base = receipt_tx
             .plaintext_copy(&self.purpose_keys.tx_io_sk)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
