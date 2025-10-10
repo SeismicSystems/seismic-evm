@@ -254,8 +254,8 @@ mod tests {
         let storage1 = db.storage(account, U256::from(1)).unwrap();
         let storage2 = db.storage(account, U256::from(2)).unwrap();
 
-        assert_eq!(storage1, U256::from(100));
-        assert_eq!(storage2, U256::from(200));
+        assert_eq!(storage1, U256::from(100).into());
+        assert_eq!(storage2, U256::from(200).into());
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests {
         let storage1 = db.storage(account, U256::from(1)).unwrap();
         let storage2 = db.storage(account, U256::from(2)).unwrap();
 
-        assert_eq!(storage1, U256::from(100));
-        assert_eq!(storage2, U256::from(200));
+        assert_eq!(storage1, U256::from(100).into());
+        assert_eq!(storage2, U256::from(200).into());
     }
 }
