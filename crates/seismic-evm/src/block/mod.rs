@@ -297,7 +297,11 @@ mod tests {
         let encryption_pubkey = PublicKey::from_secret_key(&secp, &sk);
 
         let enclave_builder = MockEnclaveClientBuilder::new();
-        let evm_factory = SeismicEvmFactory::new(enclave_builder.clone());
+        // Fetch purpose keys for testing and leak to get 'static lifetime
+        let mock_keys = Box::leak(Box::new(seismic_enclave::MockEnclaveServer::get_purpose_keys(
+            seismic_enclave::keys::GetPurposeKeysRequest { epoch: 0 },
+        )));
+        let evm_factory = SeismicEvmFactory::new_with_purpose_keys(mock_keys);
 
         state.increment_balances(vec![(signer, 1000000000000000000)]).unwrap();
         let executor_factory = SeismicBlockExecutorFactory::new(
