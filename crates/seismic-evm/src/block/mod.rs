@@ -157,7 +157,7 @@ pub struct SeismicBlockExecutorFactory<
     /// EVM factory.
     evm_factory: EvmFactory,
     /// Purpose keys for decryption.
-    purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
+    pub purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
 }
 
 impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
@@ -185,11 +185,6 @@ impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Exposes the EVM factory.
     pub const fn evm_factory(&self) -> &EvmFactory {
         &self.evm_factory
-    }
-
-    /// Exposes the purpose keys.
-    pub const fn purpose_keys(&self) -> &'static seismic_enclave::keys::GetPurposeKeysResponse {
-        self.purpose_keys
     }
 }
 
@@ -278,7 +273,7 @@ mod tests {
         purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
         encryption_pubkey: PublicKey,
         encryption_nonce: Nonce,
-        evm_factory: SeismicEvmFactory<MockEnclaveClientBuilder>,
+        evm_factory: SeismicEvmFactory,
     }
 
     fn setup_test<'a>(state: &mut State<InMemoryDB>) -> SetupTest<'a> {
@@ -343,7 +338,7 @@ mod tests {
             &setup.encryption_pubkey,
             &setup.purpose_keys.tx_io_sk,
             &pt_bytes,
-            setup.encryption_nonce,
+            setup.encryption_nonce.clone(),
         )
         .unwrap();
         TxSeismic {
