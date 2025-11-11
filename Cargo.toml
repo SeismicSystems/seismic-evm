@@ -35,8 +35,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.dependencies]
-seismic-enclave-crypto = "0.1.0"
-seismic-enclave-server = "0.1.0"
+seismic-enclave = "0.1.0"
 seismic-revm = { version = "1.0.0", default-features =  false }
 
 alloy-evm = { version = "0.20.1", path = "crates/evm", default-features = false }
@@ -72,8 +71,8 @@ serde_json = "1"
 
 [patch.crates-io]
 # enclave
-seismic-enclave-server = { git = "https://github.com/SeismicSystems/enclave.git", rev = "fb6d8ea077b9cf95439ac71c19b15b01d5d78d95" }
-seismic-enclave-crypto =  { git = "https://github.com/SeismicSystems/enclave.git", rev = "fb6d8ea077b9cf95439ac71c19b15b01d5d78d95" }
+seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "c6bc2ae15b619af1d0ec5e739a90b6f51dd7eb84" }
+
 # alloy-core
 alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "fa63d477d6aa01e7203b677632c31cb3eba00640" }
 alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "fa63d477d6aa01e7203b677632c31cb3eba00640" }
@@ -84,9 +83,9 @@ alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.
 alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "fa63d477d6aa01e7203b677632c31cb3eba00640" }
 
 # alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "7da5479c6989aca44ca74677b16dbb9f6e9f0d12" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "ab66412a7189176b8db21a4073bb8d4da082dbfe" }
 
 # revm
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "351916dd81f05dacae6ad025625b5615743a322a" }
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "351916dd81f05dacae6ad025625b5615743a322a" }
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "351916dd81f05dacae6ad025625b5615743a322a" }
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }

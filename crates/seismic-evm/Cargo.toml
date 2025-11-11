@@ -27,7 +27,7 @@ revm.workspace = true
 # seismic
 seismic-revm.workspace = true
 
-seismic-enclave-server.workspace = true
+seismic-enclave.workspace = true
 seismic-alloy-consensus = { workspace = true, features = ["std", "serde"] }
 
 # misc
@@ -35,7 +35,6 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-seismic-enclave-crypto.workspace = true
 
 [features]
 default = ["std"]

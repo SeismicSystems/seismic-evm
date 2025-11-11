@@ -43,7 +43,7 @@ where
     R::Receipt: std::fmt::Debug,
 {
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
-    purpose_keys: &'static seismic_enclave_server::GetPurposeKeysResponse,
+    purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
 }
 
 impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
@@ -59,7 +59,7 @@ where
         ctx: SeismicBlockExecutionCtx<'a>,
         spec: Spec,
         receipt_builder: R,
-        purpose_keys: &'static seismic_enclave_server::GetPurposeKeysResponse,
+        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
     ) -> Self {
         Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), purpose_keys }
     }
@@ -157,7 +157,7 @@ pub struct SeismicBlockExecutorFactory<
     /// EVM factory.
     evm_factory: EvmFactory,
     /// Purpose keys for decryption.
-    pub purpose_keys: &'static seismic_enclave_server::GetPurposeKeysResponse,
+    pub purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
 }
 
 impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
@@ -167,7 +167,7 @@ impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
         receipt_builder: R,
         spec: Spec,
         evm_factory: EvmFactory,
-        purpose_keys: &'static seismic_enclave_server::GetPurposeKeysResponse,
+        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
     ) -> Self {
         Self { receipt_builder, spec, evm_factory, purpose_keys }
     }
@@ -234,13 +234,13 @@ mod tests {
         database::{InMemoryDB, StateBuilder},
     };
     use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
-    use seismic_enclave_crypto::{
+    use seismic_enclave::GetPurposeKeysResponse;
+    use seismic_enclave::{
         get_unsecure_sample_schnorrkel_keypair, get_unsecure_sample_secp256k1_pk,
         get_unsecure_sample_secp256k1_sk,
         secp256k1::{rand, PublicKey, Secp256k1, SecretKey},
         Nonce,
     };
-    use seismic_enclave_server::GetPurposeKeysResponse;
     use seismic_revm::SeismicSpecId;
 
     use alloy_consensus::transaction::Recovered;
@@ -276,7 +276,7 @@ mod tests {
         signing_key: SigningKey,
         executor_factory: SeismicBlockExecutorFactory,
         ctx: SeismicBlockExecutionCtx<'a>,
-        purpose_keys: &'static seismic_enclave_server::GetPurposeKeysResponse,
+        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
         encryption_pubkey: PublicKey,
         encryption_nonce: Nonce,
         evm_factory: SeismicEvmFactory,
@@ -346,7 +346,7 @@ mod tests {
         };
         let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
         // Use the purpose keys directly for encryption
-        use seismic_enclave_crypto::ecdh_encrypt;
+        use seismic_enclave::ecdh_encrypt;
         let ciphertext = ecdh_encrypt(
             &setup.encryption_pubkey,
             &setup.purpose_keys.tx_io_sk,
