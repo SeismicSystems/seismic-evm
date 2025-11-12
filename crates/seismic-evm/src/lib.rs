@@ -262,13 +262,13 @@ where
 // Factory that creates SeismicEVMs with pre-fetched purpose keys.
 // The purpose keys are provided at boot time and stored globally.
 pub struct SeismicEvmFactory {
-    purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
+    purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
 }
 
 impl SeismicEvmFactory {
     /// Creates a new [`SeismicEvmFactory`] with pre-fetched purpose keys.
     pub fn new_with_purpose_keys(
-        purpose_keys: &'static seismic_enclave::keys::GetPurposeKeysResponse,
+        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
     ) -> Self {
         Self { purpose_keys }
     }
