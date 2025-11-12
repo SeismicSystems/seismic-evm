@@ -234,12 +234,11 @@ mod tests {
         database::{InMemoryDB, StateBuilder},
     };
     use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
-    use seismic_enclave::GetPurposeKeysResponse;
     use seismic_enclave::{
         get_unsecure_sample_schnorrkel_keypair, get_unsecure_sample_secp256k1_pk,
         get_unsecure_sample_secp256k1_sk,
         secp256k1::{rand, PublicKey, Secp256k1, SecretKey},
-        Nonce,
+        GetPurposeKeysResponse, Nonce,
     };
     use seismic_revm::SeismicSpecId;
 
