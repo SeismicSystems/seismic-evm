@@ -18,21 +18,25 @@ const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 sol! {
     #[allow(missing_docs)]
     event DepositEvent(
-        bytes pubkey,
-        bytes withdrawal_credentials,
-        bytes amount,
-        bytes signature,
-        bytes index
+        bytes node_pubkey,            // 32 bytes (ed25519)
+        bytes consensus_pubkey,       // 48 bytes (BLS)
+        bytes withdrawal_credentials, // 32 bytes
+        bytes amount,                 // 8 bytes  
+        bytes node_signature,         // 64 bytes (ed25519)   
+        bytes consensus_signature,    // 96 bytes (BLS)   
+        bytes index                   // 8 bytes
     );
 }
 
 /// Accumulate a deposit request from a log. containing a [`DepositEvent`].
 pub fn accumulate_deposit_from_log(log: &Log<DepositEvent>, out: &mut Vec<u8>) {
     out.reserve(DEPOSIT_BYTES_SIZE);
-    out.extend_from_slice(log.pubkey.as_ref());
+    out.extend_from_slice(log.node_pubkey.as_ref());
+    out.extend_from_slice(log.consensus_pubkey.as_ref());
     out.extend_from_slice(log.withdrawal_credentials.as_ref());
     out.extend_from_slice(log.amount.as_ref());
-    out.extend_from_slice(log.signature.as_ref());
+    out.extend_from_slice(log.node_signature.as_ref());
+    out.extend_from_slice(log.consensus_signature.as_ref());
     out.extend_from_slice(log.index.as_ref());
 }
 
