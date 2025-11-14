@@ -13,7 +13,7 @@ pub use alloy_eips::eip6110::*;
 /// bytestrings, those bytestrings are fixed size. The fields are: 48-byte
 /// pubkey, 32-byte withdrawal credentials, 8-byte amount, 96-byte signature,
 /// and 8-byte index.
-const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
+const DEPOSIT_BYTES_SIZE: usize = 32 + 48 + 32 + 8 + 64 + 96 + 8;
 
 sol! {
     #[allow(missing_docs)]
