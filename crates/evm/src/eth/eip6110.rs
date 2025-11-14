@@ -21,9 +21,9 @@ sol! {
         bytes node_pubkey,            // 32 bytes (ed25519)
         bytes consensus_pubkey,       // 48 bytes (BLS)
         bytes withdrawal_credentials, // 32 bytes
-        bytes amount,                 // 8 bytes  
-        bytes node_signature,         // 64 bytes (ed25519)   
-        bytes consensus_signature,    // 96 bytes (BLS)   
+        bytes amount,                 // 8 bytes
+        bytes node_signature,         // 64 bytes (ed25519)
+        bytes consensus_signature,    // 96 bytes (BLS)
         bytes index                   // 8 bytes
     );
 }
