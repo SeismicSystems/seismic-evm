@@ -342,6 +342,9 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            expires_at_block: 1000000,
+            signed_read: false,
         };
         let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
         // Use the purpose keys directly for encryption
