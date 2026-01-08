@@ -95,13 +95,12 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt
+        let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
-            .plaintext_copy(&self.purpose_keys.tx_io_sk)
+            .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
         // call inner
-        let signer = RecoveredTx::signer(&tx);
         let recovered = Recovered::new_unchecked(plaintext_base, *signer);
         self.inner.execute_transaction_with_commit_condition(&recovered, f)
     }
@@ -115,13 +114,12 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt
+        let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
-            .plaintext_copy(&self.purpose_keys.tx_io_sk)
+            .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
         // call inner
-        let signer = RecoveredTx::signer(&tx);
         let recovered = Recovered::new_unchecked(plaintext_base, *signer);
         self.inner.execute_transaction_with_result_closure(&recovered, f)
     }
