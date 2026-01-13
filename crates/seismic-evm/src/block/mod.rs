@@ -95,13 +95,12 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt
+        let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
-            .plaintext_copy(&self.purpose_keys.tx_io_sk)
+            .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
         // call inner
-        let signer = RecoveredTx::signer(&tx);
         let recovered = Recovered::new_unchecked(plaintext_base, *signer);
         self.inner.execute_transaction_with_commit_condition(&recovered, f)
     }
@@ -115,13 +114,12 @@ where
         // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
 
-        // decrypt
+        let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
-            .plaintext_copy(&self.purpose_keys.tx_io_sk)
+            .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
         // call inner
-        let signer = RecoveredTx::signer(&tx);
         let recovered = Recovered::new_unchecked(plaintext_base, *signer);
         self.inner.execute_transaction_with_result_closure(&recovered, f)
     }
@@ -233,7 +231,9 @@ mod tests {
         context::{BlockEnv, CfgEnv},
         database::{InMemoryDB, StateBuilder},
     };
-    use seismic_alloy_consensus::{TxSeismic, TxSeismicElements};
+    use seismic_alloy_consensus::{
+        TxLegacyFields, TxSeismic, TxSeismicElements, TxSeismicMetadata,
+    };
     use seismic_enclave::{
         get_unsecure_sample_schnorrkel_keypair, get_unsecure_sample_secp256k1_pk,
         get_unsecure_sample_secp256k1_sk,
@@ -277,6 +277,7 @@ mod tests {
         ctx: SeismicBlockExecutionCtx<'a>,
         purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
         encryption_pubkey: PublicKey,
+        encryption_sk: SecretKey,
         encryption_nonce: Nonce,
         evm_factory: SeismicEvmFactory,
     }
@@ -287,9 +288,9 @@ mod tests {
         let pubkey = signing_key.verifying_key();
         let signer = public_key_to_address(*pubkey);
 
-        let sk = SecretKey::new(rng);
+        let encryption_sk = SecretKey::new(rng);
         let secp = Secp256k1::new();
-        let encryption_pubkey = PublicKey::from_secret_key(&secp, &sk);
+        let encryption_pubkey = PublicKey::from_secret_key(&secp, &encryption_sk);
 
         // Fetch purpose keys for testing and leak to get 'static lifetime
         let mock_keys = Box::leak(Box::new(get_mock_keys()));
@@ -311,6 +312,7 @@ mod tests {
         };
         SetupTest {
             encryption_pubkey,
+            encryption_sk,
             signer,
             signing_key,
             executor_factory,
@@ -342,26 +344,37 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            expires_at_block: 1000000,
+            signed_read: false,
         };
+
         let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
-        // Use the purpose keys directly for encryption
-        use seismic_enclave::ecdh_encrypt;
-        let ciphertext = ecdh_encrypt(
-            &setup.encryption_pubkey,
-            &setup.purpose_keys.tx_io_sk,
-            &pt_bytes,
-            setup.encryption_nonce.clone(),
-        )
-        .unwrap();
+
+        let tx_metadata = TxSeismicMetadata {
+            sender: setup.signer,
+            legacy_fields: TxLegacyFields {
+                chain_id: 5124,
+                nonce: 0,
+                to: TxKind::Call(Address::ZERO),
+                value: U256::from(0),
+            },
+            seismic_elements,
+        };
+
+        let ciphertext = tx_metadata
+            .client_encrypt(&pt_bytes, &setup.purpose_keys.tx_io_pk, &setup.encryption_sk)
+            .unwrap();
+
         TxSeismic {
-            chain_id: 5124,
-            nonce: 0,
+            chain_id: tx_metadata.legacy_fields.chain_id,
+            nonce: tx_metadata.legacy_fields.nonce,
             gas_price: 1000000000,
             gas_limit: 1000000,
-            to: TxKind::Call(Address::ZERO),
-            value: U256::from(0),
-            input: Bytes::from(ciphertext),
-            seismic_elements,
+            to: tx_metadata.legacy_fields.to,
+            value: tx_metadata.legacy_fields.value,
+            input: ciphertext,
+            seismic_elements: tx_metadata.seismic_elements,
         }
     }
 
