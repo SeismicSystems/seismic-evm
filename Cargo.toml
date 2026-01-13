@@ -74,7 +74,7 @@ serde_json = "1"
 seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "ac5e28dac1ee8ec0e3922b010e6da072d6e784aa" }
 
 # alloy-core
-alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1636365501a699c47865807158544eace1" }
+alloy-dyn-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
 alloy-primitives = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
 alloy-json-abi = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
 alloy-sol-macro-expander = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
