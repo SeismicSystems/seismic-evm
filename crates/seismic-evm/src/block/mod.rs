@@ -340,7 +340,6 @@ mod tests {
     }
 
     fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
-        // Create seismic elements
         let seismic_elements = TxSeismicElements {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
@@ -350,10 +349,8 @@ mod tests {
             signed_read: false,
         };
 
-        // Prepare plaintext
         let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
 
-        // Create transaction metadata for AEAD encryption
         let tx_metadata = TxSeismicMetadata {
             sender: setup.signer,
             legacy_fields: TxLegacyFields {
@@ -365,12 +362,10 @@ mod tests {
             seismic_elements,
         };
 
-        // Encrypt with AEAD using metadata
         let ciphertext = tx_metadata
             .client_encrypt(&pt_bytes, &setup.purpose_keys.tx_io_pk, &setup.encryption_sk)
             .unwrap();
 
-        // Return transaction with encrypted input - reuse values from metadata
         TxSeismic {
             chain_id: tx_metadata.legacy_fields.chain_id,
             nonce: tx_metadata.legacy_fields.nonce,
