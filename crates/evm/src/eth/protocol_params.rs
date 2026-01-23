@@ -31,7 +31,7 @@ sol! {
 
 /// Accumulate a protocol param request from a log. containing a [`ParamEvent`].
 pub fn accumulate_protocol_param_from_log(log: &Log<ProtocolParamEvent>, out: &mut Vec<u8>) {
-    //out.reserve(PROTOCOL_PARAM_MAX_BYTES_SIZE);
+    out.reserve(PROTOCOL_PARAM_MAX_BYTES_SIZE);
     out.extend_from_slice(&[log.param_id]);
     out.extend_from_slice(log.param.as_ref());
 }
