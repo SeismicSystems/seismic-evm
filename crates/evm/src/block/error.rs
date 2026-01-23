@@ -81,7 +81,6 @@ pub enum BlockValidationError {
     #[error("failed to decode deposit requests from receipts: {_0}")]
     DepositRequestDecode(String),
     /// Error when decoding protocol param requests from receipts
-    ///
     #[error("failed to decode protocol param requests from receipts: {_0}")]
     ProtocolParamRequestDecode(String),
 }

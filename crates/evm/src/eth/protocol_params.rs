@@ -2,9 +2,8 @@
 use crate::block::BlockValidationError;
 use alloc::{string::ToString, vec::Vec};
 use alloy_consensus::TxReceipt;
-use alloy_primitives::{Address, address, Bytes, Log};
+use alloy_primitives::{address, Address, Bytes, Log};
 use alloy_sol_types::{sol, SolEvent};
-
 
 /// Protocol parameters contract address for Seismic chains.
 ///
@@ -100,10 +99,6 @@ where
     R: TxReceipt<Log = Log> + 'a,
 {
     let mut out = Vec::new();
-    accumulate_protocol_params_from_receipts(
-        SEISMIC_PROTOCOL_PARAMS_CONTRACT,
-        receipts,
-        &mut out,
-    )?;
+    accumulate_protocol_params_from_receipts(SEISMIC_PROTOCOL_PARAMS_CONTRACT, receipts, &mut out)?;
     Ok(out.into())
 }

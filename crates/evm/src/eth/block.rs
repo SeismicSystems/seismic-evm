@@ -166,7 +166,8 @@ where
                 eip6110::parse_deposits_from_receipts(&self.spec, &self.receipts)?;
 
             // Collect all protocol param requests
-            let protocol_param_requests = protocol_params::parse_protocol_params_from_receipts(&self.receipts)?;
+            let protocol_param_requests =
+                protocol_params::parse_protocol_params_from_receipts(&self.receipts)?;
 
             let mut requests = Requests::default();
 
@@ -175,7 +176,10 @@ where
             }
 
             if !protocol_param_requests.is_empty() {
-                requests.push_request_with_type(protocol_params::PROTOCOL_PARAM_REQUEST_TYPE, protocol_param_requests);
+                requests.push_request_with_type(
+                    protocol_params::PROTOCOL_PARAM_REQUEST_TYPE,
+                    protocol_param_requests,
+                );
             }
 
             requests.extend(self.system_caller.apply_post_execution_changes(&mut self.evm)?);

@@ -45,7 +45,7 @@ alloy-op-evm = { version = "0.20.1", path = "crates/op-evm", default-features = 
 alloy-eip2124 = { version = "0.2", default-features = false }
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-eips = { version = "1.0", default-features = false }
-alloy-consensus = { version = "1.0.0", default-features = false }
+alloy-consensus = { version = "1.1.0", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false }
 alloy-sol-types = { version = "1.0.0", default-features = false }
 alloy-hardforks = { version = "0.3" }
@@ -89,3 +89,5 @@ seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-all
 revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
 op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
 seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+
+alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy.git", tag = "v1.1.0" }
