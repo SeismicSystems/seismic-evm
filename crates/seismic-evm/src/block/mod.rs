@@ -137,8 +137,9 @@ where
         // Add Seismic-specific eip-7685 protocol param requests
         // Note that according to https://eips.ethereum.org/EIPS/eip-7685#ordering,
         // requests must be ordered by ascending type. Given that PROTOCOL_PARAM_REQUEST_TYPE=255,
-        // it'll always need to be ordered behind all the ethereum requests even for future hardforks.
-        // Therefore it makes sense to add these here, after the ethereum requests have been added by inner.finish().
+        // it'll always need to be ordered behind all the ethereum requests even for future
+        // hardforks. Therefore it makes sense to add these here, after the ethereum
+        // requests have been added by inner.finish().
         if self.spec.is_prague_active_at_timestamp(evm.block().timestamp.saturating_to()) {
             let protocol_param_requests =
                 protocol_params::parse_protocol_params_from_receipts(&result.receipts)?;
