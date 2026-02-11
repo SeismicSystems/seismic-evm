@@ -44,6 +44,7 @@ where
 {
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
     purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+    spec: Spec,
 }
 
 impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
@@ -61,7 +62,11 @@ where
         receipt_builder: R,
         purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
     ) -> Self {
-        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), purpose_keys }
+        Self {
+            inner: EthBlockExecutor::new(evm, ctx, spec.clone(), receipt_builder),
+            purpose_keys,
+            spec,
+        }
     }
 }
 
@@ -125,7 +130,28 @@ where
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
-        self.inner.finish()
+        use crate::protocol_params;
+
+        let (evm, mut result) = self.inner.finish()?;
+
+        // Add Seismic-specific eip-7685 protocol param requests
+        // Note that according to https://eips.ethereum.org/EIPS/eip-7685#ordering,
+        // requests must be ordered by ascending type. Given that PROTOCOL_PARAM_REQUEST_TYPE=255,
+        // it'll always need to be ordered behind all the ethereum requests even for future hardforks.
+        // Therefore it makes sense to add these here, after the ethereum requests have been added by inner.finish().
+        if self.spec.is_prague_active_at_timestamp(evm.block().timestamp.saturating_to()) {
+            let protocol_param_requests =
+                protocol_params::parse_protocol_params_from_receipts(&result.receipts)?;
+
+            if !protocol_param_requests.is_empty() {
+                result.requests.push_request_with_type(
+                    protocol_params::PROTOCOL_PARAM_REQUEST_TYPE,
+                    protocol_param_requests,
+                );
+            }
+        }
+
+        Ok((evm, result))
     }
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

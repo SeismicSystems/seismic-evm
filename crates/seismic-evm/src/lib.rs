@@ -7,6 +7,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
@@ -31,6 +33,7 @@ use seismic_revm::{
 
 pub mod block;
 pub mod hardfork;
+pub mod protocol_params;
 
 /// Seismic EVM implementation.
 ///
@@ -153,7 +156,7 @@ where
                 kind: TxKind::Call(contract),
                 // Explicitly set nonce to 0 so revm does not do any nonce checks
                 nonce: 0,
-                gas_limit: 30_000_000,
+                gas_limit: crate::protocol_params::SYSTEM_CALL_GAS_LIMIT,
                 value: U256::ZERO,
                 data,
                 // Setting the gas price to zero enforces that no value is transferred as part of

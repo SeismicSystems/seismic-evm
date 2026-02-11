@@ -1,7 +1,7 @@
 //! Ethereum block executor.
 
 use super::{
-    dao_fork, eip6110, protocol_params,
+    dao_fork, eip6110,
     receipt_builder::{AlloyReceiptBuilder, ReceiptBuilder, ReceiptBuilderCtx},
     spec::{EthExecutorSpec, EthSpec},
     EthEvmFactory,
@@ -165,21 +165,10 @@ where
             let deposit_requests =
                 eip6110::parse_deposits_from_receipts(&self.spec, &self.receipts)?;
 
-            // Collect all protocol param requests
-            let protocol_param_requests =
-                protocol_params::parse_protocol_params_from_receipts(&self.receipts)?;
-
             let mut requests = Requests::default();
 
             if !deposit_requests.is_empty() {
                 requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
-            }
-
-            if !protocol_param_requests.is_empty() {
-                requests.push_request_with_type(
-                    protocol_params::PROTOCOL_PARAM_REQUEST_TYPE,
-                    protocol_param_requests,
-                );
             }
 
             requests.extend(self.system_caller.apply_post_execution_changes(&mut self.evm)?);

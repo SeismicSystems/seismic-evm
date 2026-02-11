@@ -1,7 +1,13 @@
-//! Seismic protocol param requests parsing
-use crate::block::BlockValidationError;
+//! Seismic protocol parameter requests and system call configuration.
+//!
+//! This module contains all Seismic-specific protocol parameter logic:
+//! - Protocol parameter contract address and request type
+//! - Event parsing from transaction receipts
+//! - System call gas limit constant
+
 use alloc::{string::ToString, vec::Vec};
 use alloy_consensus::TxReceipt;
+use alloy_evm::block::BlockValidationError;
 use alloy_primitives::{address, Address, Bytes, Log};
 use alloy_sol_types::{sol, SolEvent};
 
@@ -17,6 +23,12 @@ pub const SEISMIC_PROTOCOL_PARAMS_CONTRACT: Address =
 
 /// The [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) request type for protocol param requests.
 pub const PROTOCOL_PARAM_REQUEST_TYPE: u8 = 0xFF;
+
+/// Gas limit for system calls (protocol param updates, deposits, etc.)
+///
+/// These calls are executed with gas_price = 0 and don't count against the
+/// block gas limit. Used in `SeismicEvm::transact_system_call()`.
+pub const SYSTEM_CALL_GAS_LIMIT: u64 = 30_000_000;
 
 const PROTOCOL_PARAM_MAX_BYTES_SIZE: usize = 1 + 100;
 

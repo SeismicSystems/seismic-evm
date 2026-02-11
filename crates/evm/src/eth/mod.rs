@@ -22,7 +22,6 @@ pub use block::*;
 
 pub mod dao_fork;
 pub mod eip6110;
-pub mod protocol_params;
 pub mod receipt_builder;
 pub mod spec;
 
