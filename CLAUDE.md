@@ -4,7 +4,7 @@ Fork of [alloy-evm](https://github.com/alloy-rs/alloy-evm) — an EVM abstractio
 
 ## What This Does
 
-Standard EVM transactions have publicly visible calldata. Seismic wraps the alloy-evm block executor to decrypt transaction inputs before execution using keys from a secure enclave (`seismic-enclave`). The architecture is layered: `alloy-evm` (generic) → `alloy-op-evm` (Optimism) → `alloy-seismic-evm` (Seismic). Key additions:
+Standard EVM transactions have publicly visible calldata. Seismic wraps the alloy-evm block executor to decrypt transaction inputs before execution using keys from a secure enclave (`seismic-enclave`). The repo contains parallel EVM specializations on top of a shared base: `alloy-evm` (generic) is independently extended by `alloy-op-evm` (Optimism) and `alloy-seismic-evm` (Seismic) — they are sibling crates with no dependency between them. Key Seismic additions:
 
 - **`SeismicEvm`** — wrapper around `seismic-revm::SeismicEvm` with optional inspector/tracing support and Seismic-specific transaction types (`SeismicTransaction` with `RngMode`)
 - **`SeismicEvmFactory`** — creates EVMs pre-loaded with purpose keys (RNG keypair from enclave) at boot time
@@ -43,16 +43,15 @@ cargo build
 
 ```bash
 cargo build 2>&1 | tail -1
-# Expected: Finished `dev` profile [unoptimized + debuginfo] target(s) in ...
 ```
 
 ## Test
 
 ```bash
-# Default features (15 unit tests + 1 doc-test) — the standard CI command
+# Default features — the standard CI command
 cargo test
 
-# All features (19 unit tests + 1 doc-test, adds overrides/call-util tests)
+# All features (adds overrides/call-util tests)
 cargo test --all-features
 ```
 
@@ -83,6 +82,7 @@ crates/
       block/              Block execution: BlockExecutor, BlockExecutorFactory, state changes
         system_calls/     EIP system call implementations (2935, 4788, 7002, 7251)
       eth/                Ethereum-specific: EthEvm, EthBlockExecutor, EIP-6110 deposits
+        protocol_params.rs  Seismic protocol parameter request parsing from logs
       tx.rs               Transaction conversion traits (IntoTxEnv, FromRecoveredTx, etc.)
       precompiles.rs      Precompile registry and mapping
       tracing.rs          Inspector/tracing support
@@ -104,6 +104,9 @@ crates/
 - **`crates/seismic-evm/src/lib.rs`** — `SeismicEvm` (wraps revm), `SeismicEvmFactory` (stores `&'static GetPurposeKeysResponse`)
 - **`crates/seismic-evm/src/block/mod.rs`** — `SeismicBlockExecutor` — the core Seismic logic: calls `plaintext_copy(&purpose_keys.tx_io_sk, signer)` to decrypt tx input before execution
 - **`crates/seismic-evm/src/hardfork.rs`** — `SeismicHardfork::Mercury` at block 0; all Ethereum forks < Prague active
+- **`crates/evm/src/eth/protocol_params.rs`** — parses `ProtocolParamEvent` logs from the protocol params contract (`0x...506172616D73`), EIP-7685 request type `0xFF`
+- **`crates/evm/src/tx.rs`** — Seismic-specific `IntoTxEnv` and `FromRecoveredTx` impls for `SeismicTransaction` and `SeismicTxEnvelope` (all Ethereum tx types + Seismic type `0x74`)
+- **`crates/evm/src/eth/eip6110.rs`** — modified deposit event with dual-signature structure: `node_pubkey`/`node_signature` (ed25519) + `consensus_pubkey`/`consensus_signature` (BLS)
 
 ## Dependencies (Seismic-specific)
 
@@ -125,13 +128,12 @@ All pulled via `[patch.crates-io]` pointing to SeismicSystems GitHub forks:
 
 GitHub Actions (`.github/workflows/`):
 
-- **seismic.yml** (push/PR to `seismic`): `cargo fmt --check`, `cargo build`, `RUSTFLAGS="-D warnings" cargo check`, `cargo test`
-- **ci.yml** (upstream): matrix testing, WASM/no_std/riscv targets, clippy, docs, feature powerset
+- **seismic.yml** (push/PR to `seismic`): `cargo fmt --check`, `cargo build`, `RUSTFLAGS="-D warnings" cargo check`, `cargo test` — this is the only active CI workflow
 
 ## Branches
 
 - `seismic` — main branch (PR target)
-- `develop` — upstream alloy-evm tracking
+- `main` — upstream alloy-evm tracking
 
 ## Troubleshooting
 
