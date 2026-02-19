@@ -26,8 +26,8 @@ use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
     FromTxWithEncoded, RecoveredTx,
 };
-use revm::context::result::ExecutionResult;
-use seismic_alloy_consensus::InputDecryptionElements;
+use revm::context::{result::ExecutionResult, BlockEnv};
+use seismic_alloy_consensus::{InputDecryptionElements, SeismicValidationError};
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -65,6 +65,27 @@ where
     }
 }
 
+/// Rejects Seismic transactions whose `expires_at_block` is before the current block.
+/// Non-Seismic transaction types are passed through without validation.
+fn validate_expiration(
+    tx: &impl InputDecryptionElements,
+    block: &BlockEnv,
+) -> Result<(), BlockExecutionError> {
+    if let Ok(elements) = tx.get_decryption_elements() {
+        let current_block: u64 = block.number.saturating_to();
+        if current_block > elements.expires_at_block {
+            return Err(InternalBlockExecutionError::SeismicValidationFailed(
+                SeismicValidationError::TransactionExpired {
+                    current_block,
+                    expires_at_block: elements.expires_at_block,
+                },
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
@@ -91,16 +112,14 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        // Convert from ExecutableTx<Self> to R::Transaction,
-        // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
+        validate_expiration(receipt_tx, self.evm().block())?;
 
         let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
             .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
-        // call inner
         let recovered = Recovered::new_unchecked(plaintext_base, *signer);
         self.inner.execute_transaction_with_commit_condition(&recovered, f)
     }
@@ -110,16 +129,14 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        // Convert from ExecutableTx<Self> to R::Transaction,
-        // which has the InputDecryptionElements bound
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
+        validate_expiration(receipt_tx, self.evm().block())?;
 
         let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
             .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
             .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
 
-        // call inner
         let recovered = Recovered::new_unchecked(plaintext_base, *signer);
         self.inner.execute_transaction_with_result_closure(&recovered, f)
     }
