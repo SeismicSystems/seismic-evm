@@ -339,16 +339,11 @@ mod tests {
         return tx_envelope;
     }
 
-    fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
-        let seismic_elements = TxSeismicElements {
-            encryption_pubkey: setup.encryption_pubkey,
-            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
-            message_version: 0,
-            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
-            expires_at_block: 1000000,
-            signed_read: false,
-        };
-
+    fn sample_seismic_tx_with_elements<'a>(
+        setup: &SetupTest<'a>,
+        plaintext: &str,
+        seismic_elements: TxSeismicElements,
+    ) -> TxSeismic {
         let pt_bytes = Bytes::from(plaintext.as_bytes().to_vec());
 
         let tx_metadata = TxSeismicMetadata {
@@ -376,6 +371,18 @@ mod tests {
             input: ciphertext,
             seismic_elements: tx_metadata.seismic_elements,
         }
+    }
+
+    fn sample_seismic_tx<'a>(setup: &SetupTest<'a>, plaintext: &str) -> TxSeismic {
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            expires_at_block: 1000000,
+            signed_read: false,
+        };
+        sample_seismic_tx_with_elements(setup, plaintext, seismic_elements)
     }
 
     #[test]
@@ -424,5 +431,117 @@ mod tests {
 
         let result = executor.execute_transaction(recovered);
         assert!(result.is_err(), "expected transaction to fail, but got: {:?}", result);
+    }
+
+    #[test]
+    fn test_expired_tx_rejected() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        // Set block number to 100 so the tx with expires_at_block=50 is expired
+        let mut block_env = BlockEnv::default();
+        block_env.number = U256::from(100);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            expires_at_block: 50,
+            signed_read: false,
+        };
+        let tx_seismic = sample_seismic_tx_with_elements(&setup, plaintext, seismic_elements);
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+
+        let result = executor.execute_transaction(recovered);
+        assert!(
+            result.is_err(),
+            "expired transaction should be rejected, but it was accepted"
+        );
+    }
+
+    #[test]
+    fn test_tx_at_exact_expiry_block_accepted() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        // Set block number exactly equal to expires_at_block (should still be valid)
+        let mut block_env = BlockEnv::default();
+        block_env.number = U256::from(100);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            expires_at_block: 100,
+            signed_read: false,
+        };
+        let tx_seismic = sample_seismic_tx_with_elements(&setup, plaintext, seismic_elements);
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+
+        let result = executor.execute_transaction(recovered);
+        assert!(
+            result.is_ok(),
+            "transaction at exact expiry block should be accepted, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_tx_one_block_past_expiry_rejected() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        // Set block number to one past expires_at_block
+        let mut block_env = BlockEnv::default();
+        block_env.number = U256::from(101);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            expires_at_block: 100,
+            signed_read: false,
+        };
+        let tx_seismic = sample_seismic_tx_with_elements(&setup, plaintext, seismic_elements);
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+
+        let result = executor.execute_transaction(recovered);
+        assert!(
+            result.is_err(),
+            "transaction one block past expiry should be rejected, but it was accepted"
+        );
     }
 }
