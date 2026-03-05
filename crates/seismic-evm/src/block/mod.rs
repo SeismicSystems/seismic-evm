@@ -481,10 +481,7 @@ mod tests {
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
         let result = executor.execute_transaction(recovered);
-        assert!(
-            result.is_err(),
-            "expired transaction should be rejected, but it was accepted"
-        );
+        assert!(result.is_err(), "expired transaction should be rejected, but it was accepted");
     }
 
     #[test]
