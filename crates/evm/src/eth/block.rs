@@ -157,10 +157,15 @@ where
     fn finish(
         mut self,
     ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
-        let requests = if self
-            .spec
-            .is_prague_active_at_timestamp(self.evm.block().timestamp.saturating_to())
-        {
+        // EVM block timestamp is in milliseconds when timestamp-in-seconds feature is disabled
+        // Fork activation checks always use seconds
+        let timestamp_seconds = if cfg!(feature = "timestamp-in-seconds") {
+            self.evm.block().timestamp.saturating_to()
+        } else {
+            self.evm.block().timestamp.saturating_to::<u64>() / 1000
+        };
+
+        let requests = if self.spec.is_prague_active_at_timestamp(timestamp_seconds) {
             // Collect all EIP-6110 deposits
             let deposit_requests =
                 eip6110::parse_deposits_from_receipts(&self.spec, &self.receipts)?;
@@ -327,11 +332,15 @@ mod tests {
 
     /// Replicates the Prague activation check in `EthBlockExecutor::finish`.
     ///
-    /// BUG: When `timestamp-in-seconds` is disabled, block timestamps are in
-    /// milliseconds but `finish` passes them directly without converting to
-    /// seconds first.
+    /// This mirrors the code path in `finish` which converts millisecond timestamps
+    /// to seconds before checking fork activation.
     fn finish_prague_check(spec: &EthSpec, block_timestamp: U256) -> bool {
-        spec.is_prague_active_at_timestamp(block_timestamp.saturating_to())
+        let timestamp_seconds: u64 = if cfg!(feature = "timestamp-in-seconds") {
+            block_timestamp.saturating_to()
+        } else {
+            block_timestamp.saturating_to::<u64>() / 1000
+        };
+        spec.is_prague_active_at_timestamp(timestamp_seconds)
     }
 
     /// A pre-Prague millisecond timestamp must not trigger Prague activation.
