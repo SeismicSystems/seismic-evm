@@ -315,3 +315,75 @@ where
         EthBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::eth::spec::EthSpec;
+    use alloy_hardforks::EthereumHardforks;
+    use alloy_primitives::U256;
+
+    // Prague activates at 1_746_612_311 seconds on mainnet.
+    const MAINNET_PRAGUE_TIMESTAMP: u64 = 1_746_612_311;
+
+    /// Replicates the Prague activation check in `EthBlockExecutor::finish`.
+    ///
+    /// BUG: When `timestamp-in-seconds` is disabled, block timestamps are in
+    /// milliseconds but `finish` passes them directly without converting to
+    /// seconds first.
+    fn finish_prague_check(spec: &EthSpec, block_timestamp: U256) -> bool {
+        spec.is_prague_active_at_timestamp(block_timestamp.saturating_to())
+    }
+
+    /// A pre-Prague millisecond timestamp must not trigger Prague activation.
+    ///
+    /// This test exercises the timestamp conversion that `finish` should apply.
+    /// Before the fix, `finish` passes raw milliseconds to `is_prague_active_at_timestamp`,
+    /// causing a pre-Prague block to incorrectly appear as post-Prague.
+    #[test]
+    fn test_finish_prague_gate_pre_prague_millis() {
+        let spec = EthSpec::mainnet();
+
+        // 1 second before Prague in seconds, expressed as milliseconds
+        let pre_prague_millis = U256::from((MAINNET_PRAGUE_TIMESTAMP - 1) * 1000);
+
+        // The Prague gate must report NOT active for a pre-Prague timestamp
+        assert!(
+            !finish_prague_check(&spec, pre_prague_millis),
+            "pre-Prague millisecond timestamp should not trigger Prague activation"
+        );
+    }
+
+    /// A post-Prague millisecond timestamp must correctly trigger Prague activation.
+    #[test]
+    fn test_finish_prague_gate_post_prague_millis() {
+        let spec = EthSpec::mainnet();
+
+        // 1 second after Prague in seconds, expressed as milliseconds
+        let post_prague_millis = U256::from((MAINNET_PRAGUE_TIMESTAMP + 1) * 1000);
+
+        assert!(
+            finish_prague_check(&spec, post_prague_millis),
+            "post-Prague millisecond timestamp should trigger Prague activation"
+        );
+    }
+
+    /// The Prague gate must transition exactly at the boundary.
+    #[test]
+    fn test_finish_prague_gate_boundary_millis() {
+        let spec = EthSpec::mainnet();
+
+        // Exactly at Prague activation (in milliseconds)
+        let at_prague_millis = U256::from(MAINNET_PRAGUE_TIMESTAMP * 1000);
+        assert!(
+            finish_prague_check(&spec, at_prague_millis),
+            "timestamp exactly at Prague boundary should be Prague-active"
+        );
+
+        // 1ms before Prague activation boundary (rounds down to pre-Prague second)
+        let just_before_millis = U256::from(MAINNET_PRAGUE_TIMESTAMP * 1000 - 1);
+        assert!(
+            !finish_prague_check(&spec, just_before_millis),
+            "1ms before Prague boundary should be pre-Prague"
+        );
+    }
+}
