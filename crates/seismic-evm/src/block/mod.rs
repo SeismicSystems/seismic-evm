@@ -451,6 +451,7 @@ mod tests {
             value: tx_metadata.legacy_fields.value,
             input: ciphertext,
             seismic_elements: tx_metadata.seismic_elements,
+            authorization_list: vec![],
         }
     }
 
