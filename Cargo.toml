@@ -86,8 +86,9 @@ alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy
 seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "ebc3628c9e384b1db5a41044dd32756b3e79aacb" }
 
 # revm
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "07d9df07bdcd03ccbf98fb8d1282aa19e7760a71" }
+# Pointing to the latest commit on the veridise-audit-fev-2026 branch
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "5ba06828ab6f0f8d0d62d745efd8a35862f8603c" }
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "5ba06828ab6f0f8d0d62d745efd8a35862f8603c" }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "5ba06828ab6f0f8d0d62d745efd8a35862f8603c" }
 
 alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy.git", tag = "v1.1.0" }
