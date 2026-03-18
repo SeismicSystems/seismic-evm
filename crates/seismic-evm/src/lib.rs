@@ -13,7 +13,7 @@ use core::ops::{Deref, DerefMut};
 use revm::{
     context::{result::InvalidTransaction, BlockEnv, TxEnv},
     context_interface::{
-        result::{EVMError, ResultAndState},
+        result::{EVMError, HaltReason, ResultAndState},
         ContextTr,
     },
     database_interface::EmptyDB,
@@ -26,7 +26,7 @@ use seismic_revm::{
     instructions::instruction_provider::SeismicInstructions,
     precompiles::SeismicPrecompiles,
     transaction::abstraction::{RngMode, SeismicTransaction},
-    DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicHaltReason, SeismicSpecId,
+    DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicSpecId,
 };
 
 pub mod block;
@@ -110,7 +110,7 @@ where
     type DB = DB;
     type Tx = SeismicTransaction<TxEnv>;
     type Error = EVMError<DB::Error>;
-    type HaltReason = SeismicHaltReason;
+    type HaltReason = HaltReason;
     type Spec = SeismicSpecId;
     type Precompiles = P;
     type Inspector = I;
@@ -322,7 +322,7 @@ impl EvmFactory for SeismicEvmFactory {
     type Tx = SeismicTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> =
         EVMError<DBError, InvalidTransaction>;
-    type HaltReason = SeismicHaltReason;
+    type HaltReason = HaltReason;
     type Spec = SeismicSpecId;
     type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
 
