@@ -5,8 +5,8 @@
 //! of these traits is to enable flexible transaction input while maintaining type safety.
 
 use alloy_consensus::{
-    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Transaction, TxEip1559,
-    TxEip2930, TxEip4844, TxEip7702, TxLegacy,
+    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, TxEip1559, TxEip2930, TxEip4844,
+    TxEip7702, TxLegacy,
 };
 use alloy_eips::{
     eip2718::WithEncoded,
@@ -578,7 +578,8 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
 
 /// Required by `SeismicAlloyReceiptBuilder` (which sets `Transaction = SeismicTxEnvelope`).
 /// Must live in this crate due to the orphan rule.
-/// Note: the production path in seismic-reth uses `FromRecoveredTx<SeismicTransactionSigned>` instead.
+/// Note: the production path in seismic-reth uses `FromRecoveredTx<SeismicTransactionSigned>`
+/// instead.
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
         // TODO: rng_mode should be derived from context (simulation vs block execution)
