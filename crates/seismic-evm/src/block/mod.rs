@@ -522,6 +522,41 @@ mod tests {
         );
     }
 
+    /// PoC: tx with invalid recent_block_hash is accepted (no block hash validation)
+    #[test]
+    fn test_invalid_recent_block_hash_accepted_poc() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let seismic_elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+            recent_block_hash: alloy_primitives::B256::from_slice(&[0xAB; 32]),
+            expires_at_block: 1000000,
+            signed_read: false,
+        };
+        let tx_seismic = sample_seismic_tx_with_elements(&setup, plaintext, seismic_elements);
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+
+        let result = executor.execute_transaction(recovered);
+        assert!(
+            result.is_ok(),
+            "PoC: expected current behavior (accepted invalid block hash tx), got: {:?}",
+            result
+        );
+    }
+
     #[test]
     fn test_tx_one_block_past_expiry_rejected() {
         let db = InMemoryDB::default();
