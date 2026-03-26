@@ -83,7 +83,7 @@ alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.
 alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "68313cb636365501a699c47865807158544eace1" }
 
 # alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "ebc3628c9e384b1db5a41044dd32756b3e79aacb" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "2e9f72b16feb458e0db25ac2505b323b3d3917e8" }
 
 # revm
 # Pointing to the latest commit on the veridise-audit-fev-2026 branch

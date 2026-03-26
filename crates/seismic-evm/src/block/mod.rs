@@ -26,8 +26,8 @@ use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
     FromTxWithEncoded, RecoveredTx,
 };
-use revm::context::{result::ExecutionResult, BlockEnv};
-use seismic_alloy_consensus::{InputDecryptionElements, SeismicValidationError};
+use revm::context::result::ExecutionResult;
+use seismic_alloy_consensus::InputDecryptionElements;
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -65,27 +65,6 @@ where
     }
 }
 
-/// Rejects Seismic transactions whose `expires_at_block` is before the current block.
-/// Non-Seismic transaction types are passed through without validation.
-fn validate_expiration(
-    tx: &impl InputDecryptionElements,
-    block: &BlockEnv,
-) -> Result<(), BlockExecutionError> {
-    if let Ok(elements) = tx.get_decryption_elements() {
-        let current_block: u64 = block.number.saturating_to();
-        if current_block > elements.expires_at_block {
-            return Err(InternalBlockExecutionError::SeismicValidationFailed(
-                SeismicValidationError::TransactionExpired {
-                    current_block,
-                    expires_at_block: elements.expires_at_block,
-                },
-            )
-            .into());
-        }
-    }
-    Ok(())
-}
-
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
@@ -113,7 +92,10 @@ where
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
-        validate_expiration(receipt_tx, self.evm().block())?;
+        let current_block: u64 = self.evm().block().number.saturating_to();
+        receipt_tx
+            .validate_block(current_block, &[self.inner.ctx.parent_hash])
+            .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
         let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
@@ -130,7 +112,10 @@ where
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
-        validate_expiration(receipt_tx, self.evm().block())?;
+        let current_block: u64 = self.evm().block().number.saturating_to();
+        receipt_tx
+            .validate_block(current_block, &[self.inner.ctx.parent_hash])
+            .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
         let signer = RecoveredTx::signer(&tx);
         let plaintext_base = receipt_tx
@@ -395,7 +380,8 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
-            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            // Must match setup_test's parent_hash (B256::ZERO)
+            recent_block_hash: B256::ZERO,
             expires_at_block: 1000000,
             signed_read: false,
         };
@@ -472,7 +458,7 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
-            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            recent_block_hash: B256::ZERO,
             expires_at_block: 50,
             signed_read: false,
         };
@@ -506,7 +492,7 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
-            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            recent_block_hash: B256::ZERO,
             expires_at_block: 100,
             signed_read: false,
         };
@@ -522,9 +508,8 @@ mod tests {
         );
     }
 
-    /// PoC: tx with invalid recent_block_hash is accepted (no block hash validation)
     #[test]
-    fn test_invalid_recent_block_hash_accepted_poc() {
+    fn test_invalid_recent_block_hash_rejected() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
 
@@ -541,7 +526,7 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
-            recent_block_hash: alloy_primitives::B256::from_slice(&[0xAB; 32]),
+            recent_block_hash: B256::from_slice(&[0xAB; 32]), // Doesn't match parent_hash
             expires_at_block: 1000000,
             signed_read: false,
         };
@@ -550,11 +535,7 @@ mod tests {
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
         let result = executor.execute_transaction(recovered);
-        assert!(
-            result.is_ok(),
-            "PoC: expected current behavior (accepted invalid block hash tx), got: {:?}",
-            result
-        );
+        assert!(result.is_err(), "transaction with invalid recent_block_hash should be rejected");
     }
 
     #[test]
@@ -579,7 +560,7 @@ mod tests {
             encryption_pubkey: setup.encryption_pubkey,
             encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
             message_version: 0,
-            recent_block_hash: alloy_primitives::B256::from_slice(&[1u8; 32]),
+            recent_block_hash: B256::ZERO,
             expires_at_block: 100,
             signed_read: false,
         };
