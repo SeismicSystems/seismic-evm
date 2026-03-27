@@ -553,7 +553,12 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_encoded_tx(tx: &SeismicTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
         let tx_env = SeismicTransaction::<TxEnv>::from_recovered_tx(tx, sender);
 
-        Self { base: tx_env.base, tx_hash: tx_env.tx_hash, rng_mode: RngMode::Execution }
+        Self {
+            base: tx_env.base,
+            tx_hash: tx_env.tx_hash,
+            rng_mode: RngMode::Execution,
+            decryption_failed: false,
+        }
     }
 }
 
@@ -665,7 +670,7 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
                 authorization_list: vec![],
             },
         };
-        SeismicTransaction { base, tx_hash, rng_mode }
+        SeismicTransaction { base, tx_hash, rng_mode, decryption_failed: false }
     }
 }
 
