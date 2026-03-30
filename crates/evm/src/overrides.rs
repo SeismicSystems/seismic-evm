@@ -26,6 +26,9 @@ pub enum StateOverrideError<E> {
     /// Both state and state_diff were provided for an account.
     #[error("Both 'state' and 'stateDiff' fields are set for account {0}")]
     BothStateAndStateDiff(Address),
+    /// Code overrides are not permitted (Seismic privacy).
+    #[error("Code overrides are not permitted on Seismic (account: {0})")]
+    CodeOverrideNotPermitted(Address),
     /// Database error occurred.
     #[error(transparent)]
     Database(E),
@@ -133,10 +136,8 @@ where
     if let Some(nonce) = account_override.nonce {
         info.nonce = nonce;
     }
-    if let Some(code) = account_override.code {
-        // we need to set both the bytecode and the codehash
-        info.code_hash = keccak256(&code);
-        info.code = Some(Bytecode::new_raw_checked(code)?);
+    if account_override.code.is_some() {
+        return Err(StateOverrideError::CodeOverrideNotPermitted(account));
     }
     if let Some(balance) = account_override.balance {
         info.balance = balance;
@@ -199,7 +200,7 @@ mod tests {
     use revm::database::EmptyDB;
 
     #[test]
-    fn test_state_override_state() {
+    fn test_code_override_rejected_state_db() {
         let code = bytes!(
             "0x63d0e30db05f525f5f6004601c3473c02aaa39b223fe8d0a0e5c4f27ead9083c756cc25af15f5260205ff3"
         );
@@ -208,15 +209,15 @@ mod tests {
         let mut db = State::builder().with_database(CacheDB::new(EmptyDB::new())).build();
 
         let acc_override = AccountOverride::default().with_code(code.clone());
-        apply_account_override(to, acc_override, &mut db).unwrap();
-
-        let account = db.basic(to).unwrap().unwrap();
-        assert!(account.code.is_some());
-        assert_eq!(account.code_hash, keccak256(&code));
+        let result = apply_account_override(to, acc_override, &mut db);
+        assert!(
+            matches!(result, Err(StateOverrideError::CodeOverrideNotPermitted(_))),
+            "Code overrides should be rejected"
+        );
     }
 
     #[test]
-    fn test_state_override_cache_db() {
+    fn test_code_override_rejected_cache_db() {
         let code = bytes!(
             "0x63d0e30db05f525f5f6004601c3473c02aaa39b223fe8d0a0e5c4f27ead9083c756cc25af15f5260205ff3"
         );
@@ -225,11 +226,11 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
 
         let acc_override = AccountOverride::default().with_code(code.clone());
-        apply_account_override(to, acc_override, &mut db).unwrap();
-
-        let account = db.basic(to).unwrap().unwrap();
-        assert!(account.code.is_some());
-        assert_eq!(account.code_hash, keccak256(&code));
+        let result = apply_account_override(to, acc_override, &mut db);
+        assert!(
+            matches!(result, Err(StateOverrideError::CodeOverrideNotPermitted(_))),
+            "Code overrides should be rejected"
+        );
     }
 
     #[test]
