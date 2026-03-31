@@ -24,10 +24,12 @@ pub mod receipt_builder;
 use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
-    FromTxWithEncoded, RecoveredTx,
+    FromTxWithEncoded, RecoveredTx, ToTxEnv,
 };
-use revm::context::result::ExecutionResult;
+use alloy_primitives::{Bytes, U256};
+use revm::context::{result::ExecutionResult, TxEnv};
 use seismic_alloy_consensus::InputDecryptionElements;
+use seismic_revm::transaction::abstraction::SeismicTransaction;
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -65,16 +67,48 @@ where
     }
 }
 
+/// Wrapper that marks a transaction as having failed calldata decryption.
+///
+/// When converted to `SeismicTransaction<TxEnv>` via [`ToTxEnv`], the resulting
+/// transaction has `decryption_failed = true`, causing the handler to skip bytecode
+/// execution and charge only intrinsic gas.
+struct DecryptionFailed<T>(T);
+
+impl<T> ToTxEnv<SeismicTransaction<TxEnv>> for DecryptionFailed<T>
+where
+    T: ToTxEnv<SeismicTransaction<TxEnv>>,
+{
+    fn to_tx_env(&self) -> SeismicTransaction<TxEnv> {
+        let mut tx = self.0.to_tx_env();
+        tx.decryption_failed = true;
+        // Zero value so revm's validation doesn't require the sender to cover
+        // a transfer amount that will never happen (execution is skipped).
+        tx.base.value = U256::ZERO;
+        tx
+    }
+}
+
+impl<T, Tx> RecoveredTx<Tx> for DecryptionFailed<T>
+where
+    T: RecoveredTx<Tx>,
+{
+    fn tx(&self) -> &Tx {
+        self.0.tx()
+    }
+
+    fn signer(&self) -> &alloy_primitives::Address {
+        self.0.signer()
+    }
+}
+
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
-    E: Evm<
-        DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-    >,
+    E: Evm<DB = &'db mut State<DB>, Tx = SeismicTransaction<TxEnv>>,
+    SeismicTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
-        Transaction: Transaction + Encodable2718 + InputDecryptionElements,
+        Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
         Receipt: TxReceipt<Log = Log>,
     >,
 {
@@ -98,12 +132,23 @@ where
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
         let signer = RecoveredTx::signer(&tx);
-        let plaintext_base = receipt_tx
-            .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
-            .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
-
-        let recovered = Recovered::new_unchecked(plaintext_base, *signer);
-        self.inner.execute_transaction_with_commit_condition(&recovered, f)
+        match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
+            Ok(plaintext_base) => {
+                let recovered = Recovered::new_unchecked(plaintext_base, *signer);
+                self.inner.execute_transaction_with_commit_condition(&recovered, f)
+            }
+            Err(_) => {
+                // Decryption failed: zero the calldata so intrinsic gas is only
+                // the 21k base cost, then wrap in DecryptionFailed so the handler
+                // skips bytecode execution. revm handles all gas accounting
+                // (sender debit, coinbase credit, gas refund) natively.
+                let mut failed_tx = receipt_tx.clone();
+                let _ = failed_tx.set_input(Bytes::new());
+                let recovered = Recovered::new_unchecked(failed_tx, *signer);
+                self.inner
+                    .execute_transaction_with_commit_condition(DecryptionFailed(&recovered), f)
+            }
+        }
     }
 
     fn execute_transaction_with_result_closure(
@@ -118,12 +163,18 @@ where
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
         let signer = RecoveredTx::signer(&tx);
-        let plaintext_base = receipt_tx
-            .plaintext_copy(&self.purpose_keys.tx_io_sk, *signer)
-            .map_err(|e| InternalBlockExecutionError::FailedToDecryptSeismicTx(e))?;
-
-        let recovered = Recovered::new_unchecked(plaintext_base, *signer);
-        self.inner.execute_transaction_with_result_closure(&recovered, f)
+        match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
+            Ok(plaintext_base) => {
+                let recovered = Recovered::new_unchecked(plaintext_base, *signer);
+                self.inner.execute_transaction_with_result_closure(&recovered, f)
+            }
+            Err(_) => {
+                let mut failed_tx = receipt_tx.clone();
+                let _ = failed_tx.set_input(Bytes::new());
+                let recovered = Recovered::new_unchecked(failed_tx, *signer);
+                self.inner.execute_transaction_with_result_closure(DecryptionFailed(&recovered), f)
+            }
+        }
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -195,7 +246,8 @@ where
         Receipt: TxReceipt<Log = Log>,
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
-    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
+    EvmF: EvmFactory<Tx = SeismicTransaction<TxEnv>>,
+    SeismicTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Self: 'static,
 {
     type EvmFactory = EvmF;
@@ -408,10 +460,10 @@ mod tests {
         executor.execute_transaction(recovered).unwrap();
     }
 
-    // Expected behavior for now is panic as MockClient panics on bad encryption/decryption
-    // This test case may need to be updated if the MockClient is changed to return
+    /// Decryption failure is now handled as a metered transaction failure:
+    /// the sender is charged intrinsic gas and a failed receipt is emitted.
     #[test]
-    fn test_incorrect_encryption() {
+    fn test_incorrect_encryption_charges_gas() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
 
@@ -432,8 +484,83 @@ mod tests {
         let tx_envelope = get_tx_envelope(&setup, tx_seismic);
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
 
-        let result = executor.execute_transaction(recovered);
-        assert!(result.is_err(), "expected transaction to fail, but got: {:?}", result);
+        let gas_used = executor
+            .execute_transaction(recovered)
+            .expect("decryption failure should be handled gracefully");
+
+        // Should charge intrinsic gas (21000 base + per-byte calldata cost)
+        assert!(gas_used > 0, "decryption failure should charge gas, got: {gas_used}");
+        assert!(gas_used >= 21_000, "should charge at least intrinsic base gas");
+    }
+
+    /// Decryption failure produces a receipt with status=0 and is properly
+    /// accounted for in the block result.
+    #[test]
+    fn test_decrypt_failure_emits_failed_receipt() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let plaintext = "hello world";
+        let mut tx_seismic = sample_seismic_tx(&setup, plaintext);
+        let rng = &mut rand::thread_rng();
+        let wrong_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &SecretKey::new(rng));
+        tx_seismic.seismic_elements.encryption_pubkey = wrong_pubkey;
+
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+        executor.execute_transaction(recovered).expect("should handle decryption failure");
+
+        let (_, block_result) = executor.finish().expect("finish should succeed");
+        assert_eq!(block_result.receipts.len(), 1, "should produce exactly one receipt");
+        assert!(block_result.gas_used > 0, "block gas_used should reflect charged gas");
+        assert!(!block_result.receipts[0].status(), "receipt should have failed status (status=0)");
+    }
+
+    /// Block execution continues after a decryption failure — subsequent valid
+    /// transactions still execute normally.
+    #[test]
+    fn test_block_continues_after_decrypt_failure() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+
+        let setup = setup_test(&mut state);
+
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        // First: a bad decryption tx
+        let mut bad_tx = sample_seismic_tx(&setup, "bad-decrypt");
+        let rng = &mut rand::thread_rng();
+        let wrong_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &SecretKey::new(rng));
+        bad_tx.seismic_elements.encryption_pubkey = wrong_pubkey;
+        let bad_envelope = get_tx_envelope(&setup, bad_tx);
+        let bad_recovered = Recovered::new_unchecked(&bad_envelope, setup.signer);
+        executor.execute_transaction(bad_recovered).expect("bad decrypt should be handled");
+
+        // Second: a valid tx (nonce=1 because the failed tx consumed nonce=0)
+        let mut good_tx = sample_seismic_tx(&setup, "valid-tx");
+        good_tx.nonce = 1;
+        let good_envelope = get_tx_envelope(&setup, good_tx);
+        let good_recovered = Recovered::new_unchecked(&good_envelope, setup.signer);
+        executor.execute_transaction(good_recovered).expect("valid tx should succeed");
+
+        let (_, block_result) = executor.finish().expect("finish should succeed");
+        assert_eq!(block_result.receipts.len(), 2, "should have receipts for both transactions");
+        assert!(
+            block_result.gas_used > 21_000,
+            "total gas should exceed intrinsic gas for the failed tx"
+        );
     }
 
     #[test]

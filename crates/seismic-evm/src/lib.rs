@@ -174,6 +174,7 @@ where
             },
             tx_hash: Default::default(),
             rng_mode: RngMode::Execution,
+            decryption_failed: false,
         };
 
         let mut gas_limit = tx.base.gas_limit;
