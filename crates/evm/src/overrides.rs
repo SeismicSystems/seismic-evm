@@ -178,8 +178,8 @@ where
                 slot.into(),
                 EvmStorageSlot {
                     // we use inverted value here to ensure that storage is treated as changed
-                    original_value: (!value).into(),
-                    present_value: value.into(),
+                    original_value: U256::from_be_bytes((!value).0).into(),
+                    present_value: U256::from_be_bytes(value.0).into(),
                     is_cold: false,
                     transaction_id: 0,
                 },
