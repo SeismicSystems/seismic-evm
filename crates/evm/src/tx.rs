@@ -20,7 +20,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, TxKind};
 use revm::{context::TxEnv, context_interface::either::Either};
 use seismic_alloy_consensus::{SeismicTxEnvelope, SEISMIC_TX_TYPE_ID};
-use seismic_revm::{transaction::abstraction::RngMode, SeismicTransaction};
+use seismic_revm::SeismicTransaction;
 
 /// Trait marking types that can be converted into a transaction environment.
 ///
@@ -553,12 +553,7 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_encoded_tx(tx: &SeismicTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
         let tx_env = SeismicTransaction::<TxEnv>::from_recovered_tx(tx, sender);
 
-        Self {
-            base: tx_env.base,
-            tx_hash: tx_env.tx_hash,
-            rng_mode: RngMode::Execution,
-            decryption_failed: false,
-        }
+        Self { base: tx_env.base, tx_hash: tx_env.tx_hash, decryption_failed: false }
     }
 }
 
@@ -567,10 +562,6 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
 /// Necessary to include in this crate due to the orphan rule.
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
-        // TODO: this should not be hardcoded
-        // Ok for now because we only use this for testing
-        let rng_mode = RngMode::Execution;
-
         let tx_hash = tx.tx_hash().clone();
         let base = match tx {
             SeismicTxEnvelope::Legacy(tx) => TxEnv {
@@ -670,7 +661,7 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
                 authorization_list: vec![],
             },
         };
-        SeismicTransaction { base, tx_hash, rng_mode, decryption_failed: false }
+        SeismicTransaction { base, tx_hash, decryption_failed: false }
     }
 }
 

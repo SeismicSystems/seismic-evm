@@ -23,10 +23,9 @@ use revm::{
     Context, ExecuteEvm, InspectEvm, Inspector,
 };
 use seismic_revm::{
-    instructions::instruction_provider::SeismicInstructions,
-    precompiles::SeismicPrecompiles,
-    transaction::abstraction::{RngMode, SeismicTransaction},
-    DefaultSeismicContext, SeismicBuilder, SeismicContext, SeismicSpecId,
+    instructions::instruction_provider::SeismicInstructions, precompiles::SeismicPrecompiles,
+    transaction::abstraction::SeismicTransaction, DefaultSeismicContext, SeismicBuilder,
+    SeismicContext, SeismicSpecId,
 };
 
 pub mod block;
@@ -173,7 +172,6 @@ where
                 authorization_list: Default::default(),
             },
             tx_hash: Default::default(),
-            rng_mode: RngMode::Execution,
             decryption_failed: false,
         };
 
