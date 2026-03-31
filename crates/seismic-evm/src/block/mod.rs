@@ -121,10 +121,8 @@ where
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
-    E: Evm<
-            DB = &'db mut State<DB>,
-            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-        > + SeismicChainAccess,
+    E: Evm<DB = &'db mut State<DB>, Tx = SeismicTransaction<TxEnv>> + SeismicChainAccess,
+    SeismicTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
         Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
