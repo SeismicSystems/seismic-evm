@@ -26,7 +26,7 @@ use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
     FromTxWithEncoded, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::U256;
 use revm::context::{result::ExecutionResult, TxEnv};
 use seismic_alloy_consensus::InputDecryptionElements;
 use seismic_revm::transaction::abstraction::SeismicTransaction;
@@ -138,13 +138,11 @@ where
                 self.inner.execute_transaction_with_commit_condition(&recovered, f)
             }
             Err(_) => {
-                // Decryption failed: zero the calldata so intrinsic gas is only
-                // the 21k base cost, then wrap in DecryptionFailed so the handler
-                // skips bytecode execution. revm handles all gas accounting
-                // (sender debit, coinbase credit, gas refund) natively.
-                let mut failed_tx = receipt_tx.clone();
-                let _ = failed_tx.set_input(Bytes::new());
-                let recovered = Recovered::new_unchecked(failed_tx, *signer);
+                // Decryption failed: wrap in DecryptionFailed so the handler
+                // skips bytecode execution and charges intrinsic gas (including
+                // calldata cost). revm handles all gas accounting (sender debit,
+                // coinbase credit, gas refund) natively.
+                let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
                 self.inner
                     .execute_transaction_with_commit_condition(DecryptionFailed(&recovered), f)
             }
@@ -169,9 +167,7 @@ where
                 self.inner.execute_transaction_with_result_closure(&recovered, f)
             }
             Err(_) => {
-                let mut failed_tx = receipt_tx.clone();
-                let _ = failed_tx.set_input(Bytes::new());
-                let recovered = Recovered::new_unchecked(failed_tx, *signer);
+                let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
                 self.inner.execute_transaction_with_result_closure(DecryptionFailed(&recovered), f)
             }
         }
@@ -489,8 +485,7 @@ mod tests {
             .expect("decryption failure should be handled gracefully");
 
         // Should charge intrinsic gas (21000 base + per-byte calldata cost)
-        assert!(gas_used > 0, "decryption failure should charge gas, got: {gas_used}");
-        assert!(gas_used >= 21_000, "should charge at least intrinsic base gas");
+        assert!(gas_used > 21_000, "should charge base gas plus calldata gas, got: {gas_used}");
     }
 
     /// Decryption failure produces a receipt with status=0 and is properly
