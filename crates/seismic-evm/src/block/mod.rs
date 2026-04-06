@@ -193,8 +193,7 @@ where
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
-        let recent_hashes =
-            collect_recent_block_hashes(parent_hash, current_block, self.evm_mut());
+        let recent_hashes = collect_recent_block_hashes(parent_hash, current_block, self.evm_mut());
         receipt_tx
             .validate_block(current_block, &recent_hashes)
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
@@ -233,8 +232,7 @@ where
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
-        let recent_hashes =
-            collect_recent_block_hashes(parent_hash, current_block, self.evm_mut());
+        let recent_hashes = collect_recent_block_hashes(parent_hash, current_block, self.evm_mut());
         receipt_tx
             .validate_block(current_block, &recent_hashes)
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
