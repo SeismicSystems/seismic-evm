@@ -5,21 +5,17 @@
 //! of these traits is to enable flexible transaction input while maintaining type safety.
 
 use alloy_consensus::{
-    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, Transaction, TxEip1559,
-    TxEip2930, TxEip4844, TxEip7702, TxLegacy,
+    crypto::secp256k1, transaction::Recovered, EthereumTxEnvelope, TxEip1559, TxEip2930, TxEip4844,
+    TxEip7702, TxLegacy,
 };
 use alloy_eips::{
-    eip2718::{
-        WithEncoded, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-        EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
-    },
-    eip2930::AccessList,
+    eip2718::WithEncoded,
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     Typed2718,
 };
 use alloy_primitives::{Address, Bytes, TxKind};
 use revm::{context::TxEnv, context_interface::either::Either};
-use seismic_alloy_consensus::{SeismicTxEnvelope, SEISMIC_TX_TYPE_ID};
+use seismic_alloy_consensus::{SeismicTxEnvelope, TxSeismic, SEISMIC_TX_TYPE_ID};
 use seismic_revm::{transaction::abstraction::RngMode, SeismicTransaction};
 
 /// Trait marking types that can be converted into a transaction environment.
@@ -327,6 +323,29 @@ impl FromTxWithEncoded<TxEip7702> for TxEnv {
     }
 }
 
+impl FromRecoveredTx<TxSeismic> for TxEnv {
+    fn from_recovered_tx(tx: &TxSeismic, caller: Address) -> Self {
+        Self {
+            tx_type: SEISMIC_TX_TYPE_ID,
+            caller,
+            gas_limit: tx.gas_limit,
+            gas_price: tx.gas_price,
+            kind: tx.to,
+            value: tx.value,
+            data: tx.input.clone(),
+            nonce: tx.nonce,
+            chain_id: Some(tx.chain_id),
+            ..Default::default()
+        }
+    }
+}
+
+impl FromTxWithEncoded<TxSeismic> for TxEnv {
+    fn from_encoded_tx(tx: &TxSeismic, sender: Address, _encoded: Bytes) -> Self {
+        Self::from_recovered_tx(tx, sender)
+    }
+}
+
 /// Helper trait to abstract over different [`Recovered<T>`] implementations.
 ///
 /// Implemented for [`Recovered<T>`], `Recovered<&T>`, `&Recovered<T>`, `&Recovered<&T>`
@@ -562,113 +581,23 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     }
 }
 
-// seismic upstream merge: this is still needed?
-/// Necessary to run a test case that uses the SeismicAlloyReceiptBuilder for the SeismicEvm
-/// Necessary to include in this crate due to the orphan rule.
+/// Required by `SeismicAlloyReceiptBuilder` (which sets `Transaction = SeismicTxEnvelope`).
+/// Must live in this crate due to the orphan rule.
+/// Note: the production path in seismic-reth uses `FromRecoveredTx<SeismicTransactionSigned>`
+/// instead.
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
-        // TODO: this should not be hardcoded
-        // Ok for now because we only use this for testing
+        // TODO: rng_mode should be derived from context (simulation vs block execution)
         let rng_mode = RngMode::Execution;
 
         let tx_hash = tx.tx_hash().clone();
         let base = match tx {
-            SeismicTxEnvelope::Legacy(tx) => TxEnv {
-                tx_type: LEGACY_TX_TYPE_ID,
-                caller: sender,
-                gas_limit: tx.tx().gas_limit,
-                gas_price: tx.tx().gas_price,
-                kind: tx.tx().kind(),
-                value: tx.tx().value.into(),
-                data: tx.tx().input.clone(),
-                nonce: tx.tx().nonce,
-                chain_id: tx.tx().chain_id,
-                access_list: AccessList::default(),
-                gas_priority_fee: None,
-                blob_hashes: vec![],
-                max_fee_per_blob_gas: 0,
-                authorization_list: vec![],
-            },
-            SeismicTxEnvelope::Eip2930(tx) => TxEnv {
-                tx_type: EIP2930_TX_TYPE_ID,
-                caller: sender,
-                gas_limit: tx.tx().gas_limit,
-                gas_price: tx.tx().gas_price,
-                kind: tx.tx().kind(),
-                value: tx.tx().value.into(),
-                data: tx.tx().input.clone(),
-                nonce: tx.tx().nonce,
-                chain_id: tx.tx().chain_id(),
-                access_list: AccessList::default(),
-                gas_priority_fee: None,
-                blob_hashes: vec![],
-                max_fee_per_blob_gas: 0,
-                authorization_list: vec![],
-            },
-            SeismicTxEnvelope::Eip1559(tx) => TxEnv {
-                tx_type: EIP1559_TX_TYPE_ID,
-                caller: sender,
-                gas_limit: tx.tx().gas_limit,
-                gas_price: tx.tx().gas_price().unwrap_or_default(),
-                kind: tx.tx().kind(),
-                value: tx.tx().value.into(),
-                data: tx.tx().input.clone(),
-                nonce: tx.tx().nonce,
-                chain_id: tx.tx().chain_id(),
-                access_list: AccessList::default(),
-                gas_priority_fee: None,
-                blob_hashes: vec![],
-                max_fee_per_blob_gas: 0,
-                authorization_list: vec![],
-            },
-            SeismicTxEnvelope::Eip4844(tx) => TxEnv {
-                tx_type: EIP4844_TX_TYPE_ID,
-                caller: sender,
-                gas_limit: tx.tx().gas_limit(),
-                gas_price: tx.tx().gas_price().unwrap_or_default(),
-                kind: tx.tx().kind(),
-                value: tx.tx().value().into(),
-                data: tx.tx().input().clone(),
-                nonce: tx.tx().nonce(),
-                chain_id: tx.tx().chain_id(),
-                access_list: AccessList::default(),
-                gas_priority_fee: None,
-                blob_hashes: vec![],
-                max_fee_per_blob_gas: 0,
-                authorization_list: vec![],
-            },
-            SeismicTxEnvelope::Eip7702(tx) => TxEnv {
-                tx_type: EIP7702_TX_TYPE_ID,
-                caller: sender,
-                gas_limit: tx.tx().gas_limit,
-                gas_price: tx.tx().gas_price().unwrap_or_default(),
-                kind: tx.tx().kind(),
-                value: tx.tx().value.into(),
-                data: tx.tx().input.clone(),
-                nonce: tx.tx().nonce,
-                chain_id: tx.tx().chain_id(),
-                access_list: AccessList::default(),
-                gas_priority_fee: None,
-                blob_hashes: vec![],
-                max_fee_per_blob_gas: 0,
-                authorization_list: vec![],
-            },
-            SeismicTxEnvelope::Seismic(tx) => TxEnv {
-                tx_type: SEISMIC_TX_TYPE_ID,
-                caller: sender,
-                gas_limit: tx.tx().gas_limit,
-                gas_price: tx.tx().gas_price().unwrap_or_default(),
-                kind: tx.tx().kind(),
-                value: tx.tx().value.into(),
-                data: tx.tx().input.clone(),
-                nonce: tx.tx().nonce,
-                chain_id: tx.tx().chain_id(),
-                access_list: AccessList::default(),
-                gas_priority_fee: None,
-                blob_hashes: vec![],
-                max_fee_per_blob_gas: 0,
-                authorization_list: vec![],
-            },
+            SeismicTxEnvelope::Legacy(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
+            SeismicTxEnvelope::Eip2930(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
+            SeismicTxEnvelope::Eip1559(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
+            SeismicTxEnvelope::Eip4844(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
+            SeismicTxEnvelope::Eip7702(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
+            SeismicTxEnvelope::Seismic(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
         };
         SeismicTransaction { base, tx_hash, rng_mode, decryption_failed: false }
     }
