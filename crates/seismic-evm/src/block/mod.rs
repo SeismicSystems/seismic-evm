@@ -27,9 +27,26 @@ use alloy_evm::{
     FromTxWithEncoded, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::U256;
-use revm::context::{result::ExecutionResult, TxEnv};
+use revm::{
+    context::{result::ExecutionResult, TxEnv},
+    context_interface::ContextTr,
+};
 use seismic_alloy_consensus::InputDecryptionElements;
-use seismic_revm::transaction::abstraction::SeismicTransaction;
+use seismic_revm::{transaction::abstraction::SeismicTransaction, SeismicChain};
+
+/// Trait for accessing the SeismicChain from within a generic EVM context.
+/// Implemented by [`crate::SeismicEvm`] to allow the block executor to set
+/// RNG domain data (parent_block_hash, tx_hash_accumulator).
+pub trait SeismicChainAccess {
+    /// Returns a mutable reference to the [`SeismicChain`].
+    fn seismic_chain_mut(&mut self) -> &mut SeismicChain;
+}
+
+impl<DB: Database, I, P> SeismicChainAccess for crate::SeismicEvm<DB, I, P> {
+    fn seismic_chain_mut(&mut self) -> &mut SeismicChain {
+        self.ctx_mut().chain_mut()
+    }
+}
 
 type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 
@@ -104,7 +121,7 @@ where
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = SeismicTransaction<TxEnv>>,
+    E: Evm<DB = &'db mut State<DB>, Tx = SeismicTransaction<TxEnv>> + SeismicChainAccess,
     SeismicTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -117,6 +134,8 @@ where
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        let parent_hash = self.inner.ctx.parent_hash;
+        self.evm_mut().seismic_chain_mut().set_parent_block_hash(parent_hash);
         self.inner.apply_pre_execution_changes()
     }
 
@@ -131,11 +150,13 @@ where
             .validate_block(current_block, &[self.inner.ctx.parent_hash])
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
+        let tx_hash = receipt_tx.trie_hash();
+
         let signer = RecoveredTx::signer(&tx);
-        match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
+        let result = match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
             Ok(plaintext_base) => {
                 let recovered = Recovered::new_unchecked(plaintext_base, *signer);
-                self.inner.execute_transaction_with_commit_condition(&recovered, f)
+                self.inner.execute_transaction_with_commit_condition(&recovered, f)?
             }
             Err(_) => {
                 // Decryption failed: wrap in DecryptionFailed so the handler
@@ -144,9 +165,15 @@ where
                 // coinbase credit, gas refund) natively.
                 let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
                 self.inner
-                    .execute_transaction_with_commit_condition(DecryptionFailed(&recovered), f)
+                    .execute_transaction_with_commit_condition(DecryptionFailed(&recovered), f)?
             }
+        };
+
+        // Advance the tx hash accumulator only if the transaction was committed.
+        if result.is_some() {
+            self.evm_mut().seismic_chain_mut().advance_tx_accumulator(&tx_hash);
         }
+        Ok(result)
     }
 
     fn execute_transaction_with_result_closure(
@@ -160,17 +187,24 @@ where
             .validate_block(current_block, &[self.inner.ctx.parent_hash])
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
+        let tx_hash = receipt_tx.trie_hash();
+
         let signer = RecoveredTx::signer(&tx);
-        match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
+        let result = match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
             Ok(plaintext_base) => {
                 let recovered = Recovered::new_unchecked(plaintext_base, *signer);
-                self.inner.execute_transaction_with_result_closure(&recovered, f)
+                self.inner.execute_transaction_with_result_closure(&recovered, f)?
             }
             Err(_) => {
                 let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
-                self.inner.execute_transaction_with_result_closure(DecryptionFailed(&recovered), f)
+                self.inner
+                    .execute_transaction_with_result_closure(DecryptionFailed(&recovered), f)?
             }
-        }
+        };
+
+        // Always advance accumulator (this path always commits).
+        self.evm_mut().seismic_chain_mut().advance_tx_accumulator(&tx_hash);
+        Ok(result)
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -235,18 +269,17 @@ impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
     }
 }
 
-impl<R, Spec, EvmF> BlockExecutorFactory for SeismicBlockExecutorFactory<R, Spec, EvmF>
+impl<R, Spec> BlockExecutorFactory for SeismicBlockExecutorFactory<R, Spec, SeismicEvmFactory>
 where
     R: ReceiptBuilder<
         Transaction: Transaction + Encodable2718 + InputDecryptionElements + Clone,
         Receipt: TxReceipt<Log = Log>,
     >,
     Spec: SeismicHardforks + EthExecutorSpec,
-    EvmF: EvmFactory<Tx = SeismicTransaction<TxEnv>>,
     SeismicTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Self: 'static,
 {
-    type EvmFactory = EvmF;
+    type EvmFactory = SeismicEvmFactory;
     type ExecutionCtx<'a> = SeismicBlockExecutionCtx<'a>;
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -255,16 +288,14 @@ where
         &self.evm_factory
     }
 
-    // <EvmF as EvmFactory>::Tx: RecoveredTx<<R as ReceiptBuilder>::Transaction>`
-
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EvmF::Evm<&'a mut State<DB>, I>,
+        evm: <SeismicEvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
-        I: Inspector<EvmF::Context<&'a mut State<DB>>> + 'a,
+        I: Inspector<<SeismicEvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
         SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, self.purpose_keys)
     }

@@ -16,7 +16,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, TxKind};
 use revm::{context::TxEnv, context_interface::either::Either};
 use seismic_alloy_consensus::{SeismicTxEnvelope, TxSeismic, SEISMIC_TX_TYPE_ID};
-use seismic_revm::{transaction::abstraction::RngMode, SeismicTransaction};
+use seismic_revm::SeismicTransaction;
 
 /// Trait marking types that can be converted into a transaction environment.
 ///
@@ -572,12 +572,7 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_encoded_tx(tx: &SeismicTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
         let tx_env = SeismicTransaction::<TxEnv>::from_recovered_tx(tx, sender);
 
-        Self {
-            base: tx_env.base,
-            tx_hash: tx_env.tx_hash,
-            rng_mode: RngMode::Execution,
-            decryption_failed: false,
-        }
+        Self { base: tx_env.base, tx_hash: tx_env.tx_hash, decryption_failed: false }
     }
 }
 
@@ -587,9 +582,6 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
 /// instead.
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
-        // TODO: rng_mode should be derived from context (simulation vs block execution)
-        let rng_mode = RngMode::Execution;
-
         let tx_hash = tx.tx_hash().clone();
         let base = match tx {
             SeismicTxEnvelope::Legacy(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
@@ -599,7 +591,7 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
             SeismicTxEnvelope::Eip7702(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
             SeismicTxEnvelope::Seismic(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
         };
-        SeismicTransaction { base, tx_hash, rng_mode, decryption_failed: false }
+        SeismicTransaction { base, tx_hash, decryption_failed: false }
     }
 }
 
