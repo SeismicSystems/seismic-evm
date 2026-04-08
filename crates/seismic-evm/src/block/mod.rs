@@ -26,12 +26,12 @@ use alloy_evm::{
     block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
     FromTxWithEncoded, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{B256,U256};
+use alloy_primitives::{B256, U256};
 use revm::{
     context::{result::ExecutionResult, TxEnv},
     context_interface::{ContextTr, Host},
 };
-use seismic_alloy_consensus::InputDecryptionElements;
+use seismic_alloy_consensus::{InputDecryptionElements, SeismicValidationError};
 use seismic_revm::{transaction::abstraction::SeismicTransaction, SeismicChain};
 
 /// Trait for accessing the SeismicChain from within a generic EVM context.
@@ -102,34 +102,6 @@ where
     }
 }
 
-/// Collects hashes of recent blocks for `recent_block_hash` validation.
-///
-/// Always includes `parent_hash` (the authoritative hash of block `current_block - 1`),
-/// plus up to `SEISMIC_TX_RECENT_BLOCK_LOOKBACK - 1` additional hashes fetched from
-/// the database for older blocks.
-fn collect_recent_block_hashes(
-    parent_hash: B256,
-    current_block: u64,
-    evm: &mut impl BlockHashReader,
-) -> Vec<B256> {
-    let mut hashes = Vec::with_capacity(SEISMIC_TX_RECENT_BLOCK_LOOKBACK as usize);
-
-    // Always include the parent hash (block current_block - 1)
-    hashes.push(parent_hash);
-
-    // Fetch hashes for blocks current_block-2 down to the lookback limit
-    if current_block >= 2 {
-        let oldest = current_block.saturating_sub(SEISMIC_TX_RECENT_BLOCK_LOOKBACK);
-        for n in (oldest..current_block.saturating_sub(1)).rev() {
-            if let Some(hash) = evm.block_hash(n) {
-                hashes.push(hash);
-            }
-        }
-    }
-
-    hashes
-}
-
 /// Wrapper that marks a transaction as having failed calldata decryption.
 ///
 /// When converted to `SeismicTransaction<TxEnv>` via [`ToTxEnv`], the resulting
@@ -164,10 +136,50 @@ where
     }
 }
 
+fn validate_tx_decryption_elements<
+    R: Transaction + Encodable2718 + InputDecryptionElements + Clone,
+>(
+    tx: &R,
+    current_block: u64,
+    parent_hash: B256,
+    block_hash_reader: &mut impl BlockHashReader,
+) -> Result<(), SeismicValidationError> {
+    let elements = match tx.get_decryption_elements() {
+        Ok(elements) => elements,
+        Err(_) => return Ok(()), // No decryption elements; nothing to validate
+    };
+
+    if current_block > elements.expires_at_block {
+        return Err(SeismicValidationError::TransactionExpired {
+            current_block,
+            expires_at_block: elements.expires_at_block,
+        });
+    }
+
+    // Fast path: check parent hash directly
+    if elements.recent_block_hash == parent_hash {
+        return Ok(());
+    }
+
+    // Walk backwards through the lookback window
+    let oldest = current_block.saturating_sub(SEISMIC_TX_RECENT_BLOCK_LOOKBACK);
+    for n in (oldest..current_block.saturating_sub(1)).rev() {
+        if block_hash_reader.block_hash(n) == Some(elements.recent_block_hash) {
+            return Ok(());
+        }
+    }
+
+    Err(SeismicValidationError::InvalidRecentBlockHash {
+        provided_hash: elements.recent_block_hash,
+    })
+}
+
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = SeismicTransaction<TxEnv>> + SeismicChainAccess + BlockHashReader,
+    E: Evm<DB = &'db mut State<DB>, Tx = SeismicTransaction<TxEnv>>
+        + SeismicChainAccess
+        + BlockHashReader,
     SeismicTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Spec: EthExecutorSpec,
     R: ReceiptBuilder<
@@ -193,9 +205,8 @@ where
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
-        let recent_hashes = collect_recent_block_hashes(parent_hash, current_block, self.evm_mut());
-        receipt_tx
-            .validate_block(current_block, &recent_hashes)
+
+        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
         let tx_hash = receipt_tx.trie_hash();
@@ -232,9 +243,8 @@ where
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
-        let recent_hashes = collect_recent_block_hashes(parent_hash, current_block, self.evm_mut());
-        receipt_tx
-            .validate_block(current_block, &recent_hashes)
+
+        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
             .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
 
         let tx_hash = receipt_tx.trie_hash();
