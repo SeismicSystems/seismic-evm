@@ -4,7 +4,7 @@
 //! - Block and state overrides
 
 use alloc::collections::BTreeMap;
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+use alloy_primitives::{map::HashMap, Address, B256, U256};
 use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
@@ -13,7 +13,7 @@ use revm::{
     bytecode::BytecodeDecodeError,
     context::BlockEnv,
     database::{CacheDB, State},
-    state::{Account, AccountStatus, Bytecode, EvmStorageSlot},
+    state::{Account, AccountStatus, EvmStorageSlot},
     Database, DatabaseCommit,
 };
 
@@ -29,6 +29,9 @@ pub enum StateOverrideError<E> {
     /// Code overrides are not permitted (Seismic privacy).
     #[error("Code overrides are not permitted on Seismic (account: {0})")]
     CodeOverrideNotPermitted(Address),
+    /// Storage overrides (state/stateDiff) are not permitted (Seismic privacy).
+    #[error("Storage overrides are not permitted on Seismic (account: {0})")]
+    StorageOverrideNotPermitted(Address),
     /// Database error occurred.
     #[error(transparent)]
     Database(E),
@@ -138,6 +141,9 @@ where
     }
     if account_override.code.is_some() {
         return Err(StateOverrideError::CodeOverrideNotPermitted(account));
+    }
+    if account_override.state.is_some() || account_override.state_diff.is_some() {
+        return Err(StateOverrideError::StorageOverrideNotPermitted(account));
     }
     if let Some(balance) = account_override.balance {
         info.balance = balance;
