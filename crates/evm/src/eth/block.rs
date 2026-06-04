@@ -180,6 +180,10 @@ where
                 requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
             }
 
+            // EIP-7685 requires the request list to be ordered by request type in
+            // ascending order.
+            requests.extend(self.system_caller.apply_post_execution_changes(&mut self.evm)?);
+
             if !protocol_param_requests.is_empty() {
                 requests.push_request_with_type(
                     protocol_params::PROTOCOL_PARAM_REQUEST_TYPE,
@@ -187,7 +191,6 @@ where
                 );
             }
 
-            requests.extend(self.system_caller.apply_post_execution_changes(&mut self.evm)?);
             requests
         } else {
             Requests::default()
