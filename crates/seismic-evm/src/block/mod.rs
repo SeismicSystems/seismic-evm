@@ -23,7 +23,7 @@ use revm::{database::State, Inspector};
 pub mod receipt_builder;
 use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTx, InternalBlockExecutionError},
+    block::{BlockValidationError, CommitChanges, ExecutableTx},
     FromTxWithEncoded, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{B256, U256};
@@ -206,10 +206,15 @@ where
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
 
-        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
-            .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
-
         let tx_hash = receipt_tx.trie_hash();
+
+        // Freshness failure is a per-tx validity error (the tx is stale), not a fatal internal
+        // error: surface it as InvalidTx so the builder skips it and block import responds INVALID.
+        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
+            .map_err(|error| BlockValidationError::InvalidTx {
+                hash: tx_hash,
+                error: Box::new(error),
+            })?;
 
         let signer = RecoveredTx::signer(&tx);
         let result = match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
@@ -244,10 +249,15 @@ where
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
 
-        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
-            .map_err(InternalBlockExecutionError::SeismicValidationFailed)?;
-
         let tx_hash = receipt_tx.trie_hash();
+
+        // Freshness failure is a per-tx validity error (the tx is stale), not a fatal internal
+        // error: surface it as InvalidTx so the builder skips it and block import responds INVALID.
+        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
+            .map_err(|error| BlockValidationError::InvalidTx {
+                hash: tx_hash,
+                error: Box::new(error),
+            })?;
 
         let signer = RecoveredTx::signer(&tx);
         let result = match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
@@ -546,6 +556,47 @@ mod tests {
         let tx_envelope = get_tx_envelope(&setup, tx_seismic);
         let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
         executor.execute_transaction(recovered).unwrap();
+    }
+
+    /// A Seismic tx whose freshness window has passed must surface as a *validation* error
+    /// (`BlockValidationError::InvalidTx`), not a fatal `Internal` error — that classification is
+    /// what lets the payload builder skip it and block import respond INVALID.
+    #[test]
+    fn test_expired_tx_is_validation_error() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+        let setup = setup_test(&mut state);
+
+        // Block 100 with a tx that expired at block 50.
+        let mut block_env = BlockEnv::default();
+        block_env.number = U256::from(100);
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+
+        let elements = TxSeismicElements {
+            encryption_pubkey: setup.encryption_pubkey,
+            encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+            message_version: 0,
+            // Matches setup_test's parent_hash, so only the expiry check fails.
+            recent_block_hash: B256::ZERO,
+            expires_at_block: 50,
+            signed_read: false,
+        };
+        let tx = sample_seismic_tx_with_elements(&setup, "hello world", elements);
+        let tx_envelope = get_tx_envelope(&setup, tx);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+
+        let result = executor.execute_transaction(recovered);
+        assert!(
+            matches!(
+                result,
+                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx { .. }))
+            ),
+            "expired tx must be a validation (InvalidTx) error, got: {result:?}"
+        );
     }
 
     /// Decryption failure is now handled as a metered transaction failure:
