@@ -4,7 +4,8 @@ use alloc::{
     string::{String, ToString},
 };
 use alloy_primitives::B256;
-use seismic_alloy_consensus::{InputDecryptionElementsError, SeismicValidationError};
+use revm::context_interface::result::InvalidTransaction;
+use seismic_alloy_consensus::SeismicValidationError;
 
 /// Block validation error.
 #[derive(Debug, thiserror::Error)]
@@ -85,6 +86,33 @@ pub enum BlockValidationError {
     ProtocolParamRequestDecode(String),
 }
 
+/// Routes a Seismic freshness failure (a stale or expired tx) through alloy-evm's standard
+/// invalid-transaction path rather than treating it as a fatal executor error.
+///
+/// A freshness failure is a *per-transaction* validity problem — the rest of the block is
+/// unaffected — so it belongs in [`BlockValidationError::InvalidTx`], like a bad nonce or
+/// insufficient funds. That classification drives both consumers of execution errors correctly:
+/// - when *proposing* a block, the payload builder skips the offending tx and keeps building (one
+///   stale tx must not abort the whole block);
+/// - when *validating* a block received from a peer (consensus block execution, i.e. `newPayload`),
+///   the engine responds `INVALID` and rejects the block, instead of treating it as an internal
+///   node fault.
+impl InvalidTxError for SeismicValidationError {
+    /// `false`: a freshness failure is unrelated to the nonce. The builder reads this flag only to
+    /// decide whether to keep the sender's later txs; returning `false` makes it drop them, which
+    /// is correct — a skipped tx leaves a nonce gap, so its descendants can't execute anyway.
+    fn is_nonce_too_low(&self) -> bool {
+        false
+    }
+
+    /// `None`: this is a Seismic-specific validity rule with no underlying revm
+    /// [`InvalidTransaction`]. The value is only consulted to enrich error conversion (e.g. RPC
+    /// responses), which falls back to this error's `Display` when it is `None`.
+    fn as_invalid_tx_err(&self) -> Option<&InvalidTransaction> {
+        None
+    }
+}
+
 /// `BlockExecutor` Errors
 #[derive(Debug, thiserror::Error)]
 pub enum BlockExecutionError {
@@ -149,12 +177,6 @@ pub enum InternalBlockExecutionError {
         /// The EVM error.
         error: Box<dyn core::error::Error + Send + Sync>,
     },
-    /// Unable to decrypt calldata of seismic tx
-    #[error("Failed to decrypt seismic tx: {0}")]
-    FailedToDecryptSeismicTx(InputDecryptionElementsError),
-    /// Seismic transaction failed block-level validation (expiration, recent block hash)
-    #[error("Seismic tx validation failed: {0}")]
-    SeismicValidationFailed(SeismicValidationError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync + 'static>),
