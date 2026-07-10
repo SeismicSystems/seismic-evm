@@ -24,10 +24,8 @@ pub mod traits;
 pub use traits::*;
 #[cfg(feature = "call-util")]
 pub mod call;
-#[cfg(feature = "overrides")]
 pub mod overrides;
 pub mod precompiles;
-#[cfg(feature = "overrides")]
 pub mod seismic_security;
 pub mod tracing;
 

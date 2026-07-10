@@ -19,7 +19,7 @@ alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
 alloy-eips.workspace = true
 alloy-hardforks.workspace = true
-alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-rpc-types-eth.workspace = true
 
 seismic-revm = { workspace = true }
 revm.workspace = true
@@ -53,9 +53,8 @@ std = [
     "op-revm?/std",
     "thiserror/std",
     "op-alloy-consensus?/std",
-    "alloy-rpc-types-eth?/std"
+    "alloy-rpc-types-eth/std"
 ]
 op = ["op-revm", "op-alloy-consensus"]
-overrides = ["dep:alloy-rpc-types-eth"]
-call-util = ["overrides"]
+call-util = []
 timestamp-in-seconds = ["revm/timestamp-in-seconds", "seismic-revm/timestamp-in-seconds"]
