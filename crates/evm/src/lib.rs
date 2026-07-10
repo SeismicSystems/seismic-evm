@@ -27,6 +27,8 @@ pub mod call;
 #[cfg(feature = "overrides")]
 pub mod overrides;
 pub mod precompiles;
+#[cfg(feature = "overrides")]
+pub mod seismic_security;
 pub mod tracing;
 
 mod either;

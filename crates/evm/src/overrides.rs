@@ -3,6 +3,7 @@
 //! This module provides helper functions for RPC implementations, including:
 //! - Block and state overrides
 
+use crate::seismic_security;
 use alloc::collections::BTreeMap;
 use alloy_primitives::{map::HashMap, Address, B256, U256};
 use alloy_rpc_types_eth::{
@@ -120,7 +121,9 @@ where
     DB: Database + DatabaseCommit,
 {
     for (account, account_overrides) in overrides {
-        apply_account_override(account, account_overrides, db)?;
+        let filtered_override =
+            seismic_security::validate_account_override(account, &account_overrides, db)?;
+        apply_account_override(account, filtered_override, db)?;
     }
     Ok(())
 }
