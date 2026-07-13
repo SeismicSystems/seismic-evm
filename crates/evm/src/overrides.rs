@@ -14,7 +14,7 @@ use revm::{
     bytecode::BytecodeDecodeError,
     context::BlockEnv,
     database::{CacheDB, State},
-    state::{Account, AccountStatus, EvmStorageSlot},
+    state::{Account, AccountStatus},
     Database, DatabaseCommit,
 };
 
@@ -129,6 +129,11 @@ where
 }
 
 /// Applies a single [`AccountOverride`] to the database.
+///
+/// Pure mechanism: only the fields permitted by
+/// [`crate::seismic_security::validate_account_override`] are applied. Must
+/// only be called with a validated override — forbidden fields (code, storage)
+/// are not applied here and would be silently ignored.
 fn apply_account_override<DB>(
     account: Address,
     account_override: AccountOverride,
@@ -142,60 +147,17 @@ where
     if let Some(nonce) = account_override.nonce {
         info.nonce = nonce;
     }
-    if account_override.code.is_some() {
-        return Err(StateOverrideError::CodeOverrideNotPermitted(account));
-    }
-    if account_override.state.is_some() || account_override.state_diff.is_some() {
-        return Err(StateOverrideError::StorageOverrideNotPermitted(account));
-    }
     if let Some(balance) = account_override.balance {
         info.balance = balance;
     }
 
     // Create a new account marked as touched
-    let mut acc = revm::state::Account {
+    let acc = Account {
         info,
         status: AccountStatus::Touched,
         storage: Default::default(),
         transaction_id: 0,
     };
-
-    let storage_diff = match (account_override.state, account_override.state_diff) {
-        (Some(_), Some(_)) => return Err(StateOverrideError::BothStateAndStateDiff(account)),
-        (None, None) => None,
-        // If we need to override the entire state, we firstly mark account as destroyed to clear
-        // its storage, and then we mark it is "NewlyCreated" to make sure that old storage won't be
-        // used.
-        (Some(state), None) => {
-            // Destroy the account to ensure that its storage is cleared
-            db.commit(HashMap::from_iter([(
-                account,
-                Account {
-                    status: AccountStatus::SelfDestructed | AccountStatus::Touched,
-                    ..Default::default()
-                },
-            )]));
-            // Mark the account as created to ensure that old storage is not read
-            acc.mark_created();
-            Some(state)
-        }
-        (None, Some(state)) => Some(state),
-    };
-
-    if let Some(state) = storage_diff {
-        for (slot, value) in state {
-            acc.storage.insert(
-                slot.into(),
-                EvmStorageSlot {
-                    // we use inverted value here to ensure that storage is treated as changed
-                    original_value: U256::from_be_bytes((!value).0).into(),
-                    present_value: U256::from_be_bytes(value.0).into(),
-                    is_cold: false,
-                    transaction_id: 0,
-                },
-            );
-        }
-    }
 
     db.commit(HashMap::from_iter([(account, acc)]));
 
@@ -218,7 +180,7 @@ mod tests {
         let mut db = State::builder().with_database(CacheDB::new(EmptyDB::new())).build();
 
         let acc_override = AccountOverride::default().with_code(code.clone());
-        let result = apply_account_override(to, acc_override, &mut db);
+        let result = apply_state_overrides(StateOverride::from_iter([(to, acc_override)]), &mut db);
         assert!(
             matches!(result, Err(StateOverrideError::CodeOverrideNotPermitted(_))),
             "Code overrides should be rejected"
@@ -235,7 +197,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
 
         let acc_override = AccountOverride::default().with_code(code.clone());
-        let result = apply_account_override(to, acc_override, &mut db);
+        let result = apply_state_overrides(StateOverride::from_iter([(to, acc_override)]), &mut db);
         assert!(
             matches!(result, Err(StateOverrideError::CodeOverrideNotPermitted(_))),
             "Code overrides should be rejected"
@@ -254,7 +216,8 @@ mod tests {
         storage.insert(slot, value);
 
         let acc_override = AccountOverride::default().with_state_diff(storage);
-        let result = apply_account_override(account, acc_override, &mut db);
+        let result =
+            apply_state_overrides(StateOverride::from_iter([(account, acc_override)]), &mut db);
         assert!(result.is_err(), "state_diff overrides should be rejected");
     }
 
