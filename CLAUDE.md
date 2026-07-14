@@ -51,7 +51,7 @@ cargo build 2>&1 | tail -1
 # Default features — the standard CI command
 cargo test
 
-# All features (adds overrides/call-util tests)
+# All features (adds call-util tests)
 cargo test --all-features
 ```
 
@@ -86,7 +86,8 @@ crates/
       tx.rs               Transaction conversion traits (IntoTxEnv, FromRecoveredTx, etc.)
       precompiles.rs      Precompile registry and mapping
       tracing.rs          Inspector/tracing support
-      overrides.rs        State override utilities (feature-gated: "overrides")
+      overrides.rs        Block/state override application
+      seismic_security.rs Seismic security policy for overrides
       call.rs             Call utilities (feature-gated: "call-util")
   op-evm/                 Optimism EVM specialization (alloy-op-evm)
     src/block/            OP block executor with Canyon hard fork support
