@@ -80,7 +80,7 @@ where
     R::Receipt: std::fmt::Debug,
 {
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
-    purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+    purpose_keys: &'static crate::PurposeKeys,
 }
 
 impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
@@ -96,7 +96,7 @@ where
         ctx: SeismicBlockExecutionCtx<'a>,
         spec: Spec,
         receipt_builder: R,
-        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+        purpose_keys: &'static crate::PurposeKeys,
     ) -> Self {
         Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), purpose_keys }
     }
@@ -308,7 +308,7 @@ pub struct SeismicBlockExecutorFactory<
     /// EVM factory.
     evm_factory: EvmFactory,
     /// Purpose keys for decryption.
-    pub purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+    pub purpose_keys: &'static crate::PurposeKeys,
 }
 
 impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
@@ -318,7 +318,7 @@ impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
         receipt_builder: R,
         spec: Spec,
         evm_factory: EvmFactory,
-        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+        purpose_keys: &'static crate::PurposeKeys,
     ) -> Self {
         Self { receipt_builder, spec, evm_factory, purpose_keys }
     }
@@ -374,6 +374,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PurposeKeys;
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
     use alloy_primitives::{aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256};
@@ -382,14 +383,12 @@ mod tests {
         context::{BlockEnv, CfgEnv},
         database::{InMemoryDB, StateBuilder},
     };
+    use secp256k1::{rand, PublicKey, Secp256k1, SecretKey};
     use seismic_alloy_consensus::{
         TxLegacyFields, TxSeismic, TxSeismicElements, TxSeismicMetadata,
     };
-    use seismic_enclave::{
-        get_unsecure_sample_schnorrkel_keypair, get_unsecure_sample_secp256k1_pk,
-        get_unsecure_sample_secp256k1_sk,
-        secp256k1::{rand, PublicKey, Secp256k1, SecretKey},
-        GetPurposeKeysResponse, Nonce,
+    use seismic_crypto::{
+        get_unsecure_sample_secp256k1_pk, get_unsecure_sample_secp256k1_sk, Nonce,
     };
     use seismic_revm::SeismicSpecId;
 
@@ -426,7 +425,7 @@ mod tests {
         signing_key: SigningKey,
         executor_factory: SeismicBlockExecutorFactory,
         ctx: SeismicBlockExecutionCtx<'a>,
-        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+        purpose_keys: &'static crate::PurposeKeys,
         encryption_pubkey: PublicKey,
         encryption_sk: SecretKey,
         encryption_nonce: Nonce,
@@ -474,12 +473,14 @@ mod tests {
         }
     }
 
-    fn get_mock_keys() -> GetPurposeKeysResponse {
-        GetPurposeKeysResponse {
+    fn get_mock_keys() -> PurposeKeys {
+        PurposeKeys {
+            // The tx-io pair must be a valid keypair — tests encrypt to the pk
+            // and the executor decrypts with the sk. The rng value is arbitrary:
+            // no test here asserts RNG-precompile output.
             tx_io_sk: get_unsecure_sample_secp256k1_sk(),
             tx_io_pk: get_unsecure_sample_secp256k1_pk(),
-            snapshot_key_bytes: [0u8; 32],
-            rng_keypair: get_unsecure_sample_schnorrkel_keypair(),
+            rng_ikm: [0u8; 64],
         }
     }
 
