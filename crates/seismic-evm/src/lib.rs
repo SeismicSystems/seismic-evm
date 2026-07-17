@@ -31,6 +31,31 @@ use seismic_revm::{
 pub mod block;
 pub mod hardfork;
 
+pub use secp256k1;
+
+/// The per-purpose keys a node boots with. reth assembles this from the
+/// custodian socket (TEE nodes) or from its well-known constants (pre-TEE
+/// networks) and threads it by reference into the EVM factories.
+#[derive(Clone)]
+pub struct PurposeKeys {
+    /// Secret half of the network's tx-io keypair: decrypts shielded calldata.
+    pub tx_io_sk: secp256k1::SecretKey,
+    /// Public half of the network's tx-io keypair: wallets ECDH against it to
+    /// encrypt calldata.
+    pub tx_io_pk: secp256k1::PublicKey,
+    /// HKDF ikm seeding the RNG precompile: the secret half of the derived
+    /// schnorrkel keypair (`secret.to_bytes()`). Consumers only ever feed it
+    /// to HKDF — no schnorrkel crypto is performed with it.
+    pub rng_ikm: [u8; 64],
+}
+
+/// Redacted: `tx_io_sk` and `rng_ikm` are secrets.
+impl core::fmt::Debug for PurposeKeys {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PurposeKeys").field("tx_io_pk", &self.tx_io_pk).finish_non_exhaustive()
+    }
+}
+
 /// Seismic EVM implementation.
 ///
 /// This is a wrapper type around the `revm` evm with optional [`Inspector`] (tracing)
@@ -261,14 +286,12 @@ where
 // Factory that creates SeismicEVMs with pre-fetched purpose keys.
 // The purpose keys are provided at boot time and stored globally.
 pub struct SeismicEvmFactory {
-    purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
+    purpose_keys: &'static PurposeKeys,
 }
 
 impl SeismicEvmFactory {
     /// Creates a new [`SeismicEvmFactory`] with pre-fetched purpose keys.
-    pub fn new_with_purpose_keys(
-        purpose_keys: &'static seismic_enclave::GetPurposeKeysResponse,
-    ) -> Self {
+    pub fn new_with_purpose_keys(purpose_keys: &'static PurposeKeys) -> Self {
         Self { purpose_keys }
     }
 
@@ -292,7 +315,7 @@ impl SeismicEvmFactory {
 
     /// Create SeismicContext with the RNG key from purpose keys
     fn create_context_with_rng_key(&self) -> SeismicContext<EmptyDB> {
-        SeismicContext::seismic_with_rng_key(self.purpose_keys.rng_keypair.clone())
+        SeismicContext::seismic_with_rng_key(self.purpose_keys.rng_ikm)
     }
 
     /// Create an EVM with inspector using the stored RNG keypair.
