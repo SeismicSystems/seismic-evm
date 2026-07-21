@@ -72,10 +72,6 @@ serde_json = "1"
 
 [patch.crates-io]
 # enclave
-# seismic-enclave is not used anymore but resolved transitively (seismic-alloy-consensus imports
-# the facade); the entry keeps it on the same pin as seismic-crypto. We will get rid of this dep
-# once we update seismic-alloy to use seismic-crypto instead of seismic-enclave.
-seismic-enclave = { git = "https://github.com/SeismicSystems/enclave.git", rev = "8274f14cbbad76daadad3aaa1d6d0418b3eeffc0" }
 seismic-crypto = { git = "https://github.com/SeismicSystems/enclave.git", rev = "8274f14cbbad76daadad3aaa1d6d0418b3eeffc0" }
 
 # alloy-core
@@ -88,7 +84,7 @@ alloy-sol-types = { git = "https://github.com/SeismicSystems/seismic-alloy-core.
 alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy-core.git", rev = "994f7b3fbc4582c2e06a00d03c7f3fe476b1b7c7" }
 
 # alloy
-seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "c8fad0b93da53f2b423d2f6720abdb4a6cbb9082" }
+seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "92d2c0a17808eca1a3b0123d02f8aad003ee1b55" }
 
 # revm
 revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "7a3dd39011f9e2566f4b8663406f48939c00bc6f" }
