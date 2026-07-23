@@ -20,7 +20,7 @@ use revm::{
 
 /// Errors that can occur when applying state overrides.
 #[derive(Debug, thiserror::Error)]
-pub enum StateOverrideError<E> {
+pub enum OverrideError<E> {
     /// Invalid bytecode provided in override.
     #[error(transparent)]
     InvalidBytecode(#[from] BytecodeDecodeError),
@@ -33,6 +33,9 @@ pub enum StateOverrideError<E> {
     /// Storage overrides (state/stateDiff) are not permitted (Seismic privacy).
     #[error("Storage overrides are not permitted on Seismic (account: {0})")]
     StorageOverrideNotPermitted(Address),
+    /// Block overrides are not permitted.
+    #[error("Block overrides are not permitted")]
+    BlockOverrideNotPermitted,
     /// Database error occurred.
     #[error(transparent)]
     Database(E),
@@ -46,11 +49,15 @@ pub trait OverrideBlockHashes {
     fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>);
 
     /// Applies the given block overrides to the env and updates overridden block hashes.
-    fn apply_block_overrides(&mut self, overrides: BlockOverrides, env: &mut BlockEnv)
+    fn apply_block_overrides(
+        &mut self,
+        overrides: BlockOverrides,
+        env: &mut BlockEnv,
+    ) -> Result<(), OverrideError<Self::Error>>
     where
-        Self: Sized,
+        Self: Sized + Database,
     {
-        apply_block_overrides(overrides, self, env);
+        apply_block_overrides(overrides, self, env)
     }
 }
 
@@ -69,10 +76,20 @@ impl<DB> OverrideBlockHashes for State<DB> {
 }
 
 /// Applies the given block overrides to the env and updates overridden block hashes in the db.
-pub fn apply_block_overrides<DB>(overrides: BlockOverrides, db: &mut DB, env: &mut BlockEnv)
+///
+/// The overrides are first validated by
+/// [`crate::seismic_security::validate_block_overrides`], which currently
+/// rejects all block overrides on Seismic.
+pub fn apply_block_overrides<DB>(
+    overrides: BlockOverrides,
+    db: &mut DB,
+    env: &mut BlockEnv,
+) -> Result<(), OverrideError<DB::Error>>
 where
-    DB: OverrideBlockHashes,
+    DB: Database + OverrideBlockHashes,
 {
+    let overrides = seismic_security::validate_block_overrides(&overrides, db)?;
+
     let BlockOverrides {
         number,
         difficulty,
@@ -110,13 +127,15 @@ where
     if let Some(base_fee) = base_fee {
         env.basefee = base_fee.saturating_to();
     }
+
+    Ok(())
 }
 
 /// Applies the given state overrides (a set of [`AccountOverride`]) to the database.
 pub fn apply_state_overrides<DB>(
     overrides: StateOverride,
     db: &mut DB,
-) -> Result<(), StateOverrideError<DB::Error>>
+) -> Result<(), OverrideError<DB::Error>>
 where
     DB: Database + DatabaseCommit,
 {
@@ -138,11 +157,11 @@ fn apply_account_override<DB>(
     account: Address,
     account_override: AccountOverride,
     db: &mut DB,
-) -> Result<(), StateOverrideError<DB::Error>>
+) -> Result<(), OverrideError<DB::Error>>
 where
     DB: Database + DatabaseCommit,
 {
-    let mut info = db.basic(account).map_err(StateOverrideError::Database)?.unwrap_or_default();
+    let mut info = db.basic(account).map_err(OverrideError::Database)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
         info.nonce = nonce;
@@ -182,7 +201,7 @@ mod tests {
         let acc_override = AccountOverride::default().with_code(code.clone());
         let result = apply_state_overrides(StateOverride::from_iter([(to, acc_override)]), &mut db);
         assert!(
-            matches!(result, Err(StateOverrideError::CodeOverrideNotPermitted(_))),
+            matches!(result, Err(OverrideError::CodeOverrideNotPermitted(_))),
             "Code overrides should be rejected"
         );
     }
@@ -199,7 +218,7 @@ mod tests {
         let acc_override = AccountOverride::default().with_code(code.clone());
         let result = apply_state_overrides(StateOverride::from_iter([(to, acc_override)]), &mut db);
         assert!(
-            matches!(result, Err(StateOverrideError::CodeOverrideNotPermitted(_))),
+            matches!(result, Err(OverrideError::CodeOverrideNotPermitted(_))),
             "Code overrides should be rejected"
         );
     }
@@ -237,5 +256,42 @@ mod tests {
         state_overrides.insert(account, acc_override);
         let result = apply_state_overrides(state_overrides, &mut db);
         assert!(result.is_err(), "state overrides should be rejected");
+    }
+
+    #[test]
+    fn test_block_overrides_rejected_cache_db() {
+        let mut db = CacheDB::new(EmptyDB::new());
+        let mut env = BlockEnv::default();
+        let original_env = env.clone();
+
+        let overrides = BlockOverrides {
+            time: Some(12345),
+            number: Some(U256::from(100)),
+            block_hash: Some(BTreeMap::from_iter([(1u64, B256::from(U256::from(42)))])),
+            ..Default::default()
+        };
+        let result = apply_block_overrides(overrides, &mut db, &mut env);
+        assert!(
+            matches!(result, Err(OverrideError::BlockOverrideNotPermitted)),
+            "block overrides should be rejected"
+        );
+        assert_eq!(env, original_env, "env must not be modified");
+        assert!(db.cache.block_hashes.is_empty(), "block hashes must not be overridden");
+    }
+
+    #[test]
+    fn test_block_overrides_rejected_state_db() {
+        let mut db = State::builder().with_database(CacheDB::new(EmptyDB::new())).build();
+        let mut env = BlockEnv::default();
+        let original_env = env.clone();
+
+        let overrides = BlockOverrides { gas_limit: Some(1), ..Default::default() };
+        let result = db.apply_block_overrides(overrides, &mut env);
+        assert!(
+            matches!(result, Err(OverrideError::BlockOverrideNotPermitted)),
+            "block overrides should be rejected"
+        );
+        assert_eq!(env, original_env, "env must not be modified");
+        assert!(db.block_hashes.is_empty(), "block hashes must not be overridden");
     }
 }
