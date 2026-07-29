@@ -53,13 +53,25 @@ where
 /// (e.g. timestamp, number, prevrandao) could be used to trick contracts into
 /// disclosing shielded storage.
 pub fn validate_block_overrides<DB>(
-    _overrides: &BlockOverrides,
+    overrides: &BlockOverrides,
     _db: &DB,
 ) -> Result<BlockOverrides, OverrideError<DB::Error>>
 where
     DB: Database,
 {
-    Err(OverrideError::BlockOverrideNotPermitted)
+    if overrides.number.is_some()
+        || overrides.difficulty.is_some()
+        || overrides.time.is_some()
+        || overrides.gas_limit.is_some()
+        || overrides.coinbase.is_some()
+        || overrides.random.is_some()
+        || overrides.base_fee.is_some()
+        || overrides.block_hash.is_some()
+    {
+        return Err(OverrideError::BlockOverrideNotPermitted);
+    }
+
+    Ok(overrides.clone())
 }
 
 #[cfg(test)]
@@ -99,5 +111,13 @@ mod tests {
         let overrides = BlockOverrides { time: Some(12345), ..Default::default() };
         let result = validate_block_overrides(&overrides, &db);
         assert!(matches!(result, Err(OverrideError::BlockOverrideNotPermitted)));
+    }
+
+    #[test]
+    fn empty_block_overrides_allowed() {
+        let db = CacheDB::new(EmptyDB::new());
+        let overrides = BlockOverrides::default();
+        let result = validate_block_overrides(&overrides, &db);
+        assert_eq!(result.unwrap(), overrides);
     }
 }
