@@ -2,6 +2,8 @@
 
 Fork of [alloy-evm](https://github.com/alloy-rs/alloy-evm) — an EVM abstraction layer on top of [revm](https://github.com/bluealloy/revm). Adds **encrypted transaction support** for the Seismic blockchain: transactions arrive with encrypted inputs, and the block executor decrypts them via a secure enclave before execution, providing on-chain transaction privacy.
 
+**Workspace context**: this repo is part of the multi-repo Seismic workspace. If the workspace file isn't already in your context, read `../CLAUDE.md` (sibling checkout) or fetch [CLAUDE.workspace.md](https://github.com/SeismicSystems/seismic/blob/main/workspace/CLAUDE.workspace.md) (standalone checkout/CI) for key concepts, the repo map, and cross-repo conventions.
+
 ## What This Does
 
 Standard EVM transactions have publicly visible calldata. Seismic wraps the alloy-evm block executor to decrypt transaction inputs before execution using keys from a secure enclave (`seismic-enclave`). The repo contains parallel EVM specializations on top of a shared base: `alloy-evm` (generic) is independently extended by `alloy-op-evm` (Optimism) and `alloy-seismic-evm` (Seismic) — they are sibling crates with no dependency between them. Key Seismic additions:
