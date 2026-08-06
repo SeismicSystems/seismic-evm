@@ -198,6 +198,8 @@ where
             },
             tx_hash: Default::default(),
             decryption_failed: false,
+            // A system call is not an RPC read.
+            signed_read: false,
         };
 
         let mut gas_limit = tx.base.gas_limit;

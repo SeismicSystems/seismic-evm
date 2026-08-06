@@ -572,7 +572,13 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_encoded_tx(tx: &SeismicTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
         let tx_env = SeismicTransaction::<TxEnv>::from_recovered_tx(tx, sender);
 
-        Self { base: tx_env.base, tx_hash: tx_env.tx_hash, decryption_failed: false }
+        Self {
+            base: tx_env.base,
+            tx_hash: tx_env.tx_hash,
+            decryption_failed: false,
+            // A signed read never arrives as an envelope; only the RPC read path sets this.
+            signed_read: false,
+        }
     }
 }
 
@@ -591,7 +597,7 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
             SeismicTxEnvelope::Eip7702(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
             SeismicTxEnvelope::Seismic(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
         };
-        SeismicTransaction { base, tx_hash, decryption_failed: false }
+        SeismicTransaction { base, tx_hash, decryption_failed: false, signed_read: false }
     }
 }
 
