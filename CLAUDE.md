@@ -10,7 +10,7 @@ Standard EVM transactions have publicly visible calldata. Seismic wraps the allo
 
 - **`SeismicEvm`** — wrapper around `seismic-revm::SeismicEvm` with optional inspector/tracing support and Seismic-specific transaction types (`SeismicTransaction` with `RngMode`)
 - **`SeismicEvmFactory`** — creates EVMs pre-loaded with purpose keys (RNG keypair from enclave) at boot time
-- **`SeismicBlockExecutor`** — wraps `EthBlockExecutor`, decrypts tx inputs via `plaintext_copy()` using `tx_io_sk` before delegating to inner executor
+- **`SeismicBlockExecutor`** — wraps `EthBlockExecutor`, decrypts tx inputs via `plaintext_copy()` using the tx-io secret key before delegating to inner executor
 - **`SeismicHardfork`** — defines "Mercury" hardfork (active at block 0); all Ethereum forks before Prague are assumed active
 
 ## Build
@@ -105,7 +105,7 @@ crates/
 ## Key Seismic Files
 
 - **`crates/seismic-evm/src/lib.rs`** — `SeismicEvm` (wraps revm), `SeismicEvmFactory` (stores `&'static GetPurposeKeysResponse`)
-- **`crates/seismic-evm/src/block/mod.rs`** — `SeismicBlockExecutor` — the core Seismic logic: calls `plaintext_copy(&purpose_keys.tx_io_sk, signer)` to decrypt tx input before execution
+- **`crates/seismic-evm/src/block/mod.rs`** — `SeismicBlockExecutor` — the core Seismic logic: calls `plaintext_copy(&purpose_keys.tx_io.secret_key(), signer)` to decrypt tx input before execution
 - **`crates/seismic-evm/src/hardfork.rs`** — `SeismicHardfork::Mercury` at block 0; all Ethereum forks < Prague active
 - **`crates/evm/src/eth/protocol_params.rs`** — parses `ProtocolParamEvent` logs from the protocol params contract (`0x...506172616D73`), EIP-7685 request type `0xFF`
 - **`crates/evm/src/tx.rs`** — Seismic-specific `IntoTxEnv` and `FromRecoveredTx` impls for `SeismicTransaction` and `SeismicTxEnvelope` (all Ethereum tx types + Seismic type `0x74`)

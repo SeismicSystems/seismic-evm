@@ -217,7 +217,8 @@ where
             })?;
 
         let signer = RecoveredTx::signer(&tx);
-        let result = match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
+        let tx_io_sk = self.purpose_keys.tx_io.secret_key();
+        let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
             Ok(plaintext_base) => {
                 let recovered = Recovered::new_unchecked(plaintext_base, *signer);
                 self.inner.execute_transaction_with_commit_condition(&recovered, f)?
@@ -260,7 +261,8 @@ where
             })?;
 
         let signer = RecoveredTx::signer(&tx);
-        let result = match receipt_tx.plaintext_copy(&self.purpose_keys.tx_io_sk, *signer) {
+        let tx_io_sk = self.purpose_keys.tx_io.secret_key();
+        let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
             Ok(plaintext_base) => {
                 let recovered = Recovered::new_unchecked(plaintext_base, *signer);
                 self.inner.execute_transaction_with_result_closure(&recovered, f)?
@@ -387,9 +389,7 @@ mod tests {
     use seismic_alloy_consensus::{
         TxLegacyFields, TxSeismic, TxSeismicElements, TxSeismicMetadata,
     };
-    use seismic_crypto::{
-        get_unsecure_sample_secp256k1_pk, get_unsecure_sample_secp256k1_sk, Nonce,
-    };
+    use seismic_crypto::Nonce;
     use seismic_revm::SeismicSpecId;
 
     use alloy_consensus::transaction::Recovered;
@@ -443,7 +443,7 @@ mod tests {
         let encryption_pubkey = PublicKey::from_secret_key(&secp, &encryption_sk);
 
         // Fetch purpose keys for testing and leak to get 'static lifetime
-        let mock_keys = Box::leak(Box::new(get_mock_keys()));
+        let mock_keys = Box::leak(Box::new(PurposeKeys::well_known()));
         let evm_factory = SeismicEvmFactory::new_with_purpose_keys(mock_keys);
 
         state.increment_balances(vec![(signer, 1000000000000000000)]).unwrap();
@@ -473,17 +473,6 @@ mod tests {
         }
     }
 
-    fn get_mock_keys() -> PurposeKeys {
-        PurposeKeys {
-            // The tx-io pair must be a valid keypair — tests encrypt to the pk
-            // and the executor decrypts with the sk. The rng value is arbitrary:
-            // no test here asserts RNG-precompile output.
-            tx_io_sk: get_unsecure_sample_secp256k1_sk(),
-            tx_io_pk: get_unsecure_sample_secp256k1_pk(),
-            rng_ikm: [0u8; 64],
-        }
-    }
-
     fn get_tx_envelope<'a>(setup: &SetupTest<'a>, tx_seismic: TxSeismic) -> SeismicTxEnvelope {
         let sig = sign_seismic_tx(&tx_seismic, &setup.signing_key);
         let tx_signed = SignableTransaction::into_signed(tx_seismic, sig);
@@ -510,7 +499,7 @@ mod tests {
         };
 
         let ciphertext = tx_metadata
-            .client_encrypt(&pt_bytes, &setup.purpose_keys.tx_io_pk, &setup.encryption_sk)
+            .client_encrypt(&pt_bytes, &setup.purpose_keys.tx_io.public_key(), &setup.encryption_sk)
             .unwrap();
 
         TxSeismic {
