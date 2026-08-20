@@ -29,13 +29,15 @@ seismic-revm.workspace = true
 
 seismic-alloy-consensus = { workspace = true, features = ["std", "serde"] }
 
+# Source of the well-known keys `PurposeKeys::well_known` returns.
+seismic-crypto.workspace = true
+
 # misc
 auto_impl.workspace = true
 secp256k1.workspace = true
 
 [dev-dependencies]
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-seismic-crypto.workspace = true
 
 [features]
 default = ["std"]

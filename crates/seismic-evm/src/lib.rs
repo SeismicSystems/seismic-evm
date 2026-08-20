@@ -33,26 +33,43 @@ pub mod hardfork;
 
 pub use secp256k1;
 
-/// The per-purpose keys a node boots with. reth assembles this from the
-/// custodian socket (TEE nodes) or from its well-known constants (pre-TEE
-/// networks) and threads it by reference into the EVM factories.
+/// The per-purpose keys a node boots with. The node assembles this from its key
+/// custodian (TEE networks) or from the well-known keys (networks with no root
+/// key) and threads it by reference into the EVM factories.
 #[derive(Clone)]
 pub struct PurposeKeys {
-    /// Secret half of the network's tx-io keypair: decrypts shielded calldata.
-    pub tx_io_sk: secp256k1::SecretKey,
-    /// Public half of the network's tx-io keypair: wallets ECDH against it to
-    /// encrypt calldata.
-    pub tx_io_pk: secp256k1::PublicKey,
+    /// The network's tx-io keypair: wallets ECDH against the public half to
+    /// encrypt calldata, the node decrypts with the secret half. Held as one
+    /// keypair so a mismatched pair is unrepresentable.
+    pub tx_io: secp256k1::Keypair,
     /// HKDF ikm seeding the RNG precompile: the secret half of the derived
     /// schnorrkel keypair (`secret.to_bytes()`). Consumers only ever feed it
     /// to HKDF — no schnorrkel crypto is performed with it.
     pub rng_ikm: [u8; 64],
 }
 
-/// Redacted: `tx_io_sk` and `rng_ikm` are secrets.
+impl PurposeKeys {
+    /// The well-known bundle: what a network with no root key to derive purpose
+    /// keys from runs. Published in this org's public repos, so it offers no
+    /// confidentiality against anyone who reads the source — its only property
+    /// is that every node and client agrees on it.
+    ///
+    /// Which key source a node boots from is the node's decision; this is the
+    /// value it gets when that decision is the well-known keys.
+    pub fn well_known() -> Self {
+        Self {
+            tx_io: seismic_crypto::well_known_tx_io_keypair(),
+            rng_ikm: seismic_crypto::well_known_rng_ikm(),
+        }
+    }
+}
+
+/// Redacted: the tx-io secret key and `rng_ikm` are secrets.
 impl core::fmt::Debug for PurposeKeys {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("PurposeKeys").field("tx_io_pk", &self.tx_io_pk).finish_non_exhaustive()
+        f.debug_struct("PurposeKeys")
+            .field("tx_io_pk", &self.tx_io.public_key())
+            .finish_non_exhaustive()
     }
 }
 
