@@ -55,8 +55,17 @@ impl SeismicChainHardforks {
 
 impl EthereumHardforks for SeismicChainHardforks {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
-        if fork < EthereumHardfork::Prague {
-            // We assume that Seismic chains were launched with all forks before Prague activated.
+        if fork <= EthereumHardfork::Prague {
+            // We assume that Seismic chains were launched with all forks through Prague
+            // activated. Prague itself must be included here (not just forks strictly
+            // before it): seismic-reth's own hardfork schedule activates Prague at genesis
+            // (ForkCondition::Timestamp(0)), and Mercury extends Prague's precompile set
+            // (see seismic-revm's test_cancun_precompiles_in_mercury, which builds Mercury's
+            // precompiles as a superset of Precompiles::prague()). Reporting Prague as never
+            // active here caused EIP-6110/7002/7251 system calls in
+            // EthBlockExecutor::finish (crates/evm/src/eth/block.rs) to be silently skipped
+            // for any consumer using this Spec, since that gate is
+            // `spec.is_prague_active_at_timestamp(..)`.
             ForkCondition::Block(0)
         } else {
             ForkCondition::Never
@@ -73,5 +82,28 @@ impl SeismicHardforks for SeismicChainHardforks {
 impl EthExecutorSpec for SeismicChainHardforks {
     fn deposit_contract_address(&self) -> Option<Address> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for the off-by-one in `ethereum_fork_activation`: the comparison used
+    /// to be `fork < EthereumHardfork::Prague`, which excluded Prague itself and made
+    /// `is_prague_active_at_timestamp` return false at every timestamp. That gate is exactly
+    /// what `EthBlockExecutor::finish` (in `crates/evm/src/eth/block.rs`) checks before running
+    /// the EIP-6110/7002/7251 system calls, so this silently skipped them for any consumer
+    /// using this Spec.
+    #[test]
+    fn test_prague_active_at_genesis() {
+        let hardforks = SeismicChainHardforks::seismic_mainnet();
+        assert!(
+            hardforks.is_prague_active_at_timestamp(0),
+            "Prague must be active at genesis on Seismic chains -- seismic-reth's own \
+             hardfork schedule activates Prague at ForkCondition::Timestamp(0), and Mercury \
+             extends Prague's precompile set (see seismic-revm's \
+             test_cancun_precompiles_in_mercury)"
+        );
     }
 }
