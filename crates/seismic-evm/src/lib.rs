@@ -42,9 +42,8 @@ pub struct PurposeKeys {
     /// encrypt calldata, the node decrypts with the secret half. Held as one
     /// keypair so a mismatched pair is unrepresentable.
     pub tx_io: secp256k1::Keypair,
-    /// HKDF ikm seeding the RNG precompile: the secret half of the derived
-    /// schnorrkel keypair (`secret.to_bytes()`). Consumers only ever feed it
-    /// to HKDF — no schnorrkel crypto is performed with it.
+    /// HKDF ikm seeding the RNG precompile. Opaque key material: the
+    /// precompile feeds it to HKDF on every call and never interprets it.
     pub rng_ikm: [u8; 64],
 }
 
