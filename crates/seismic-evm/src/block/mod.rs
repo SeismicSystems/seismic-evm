@@ -850,10 +850,7 @@ mod tests {
             .unwrap();
         setup
             .keyring
-            .insert_epoch(
-                1,
-                PurposeKeys { tx_io: epoch1_tx_io, rng_ikm: [7u8; 64] },
-            )
+            .insert_epoch(1, PurposeKeys { tx_io: epoch1_tx_io, rng_ikm: [7u8; 64] })
             .unwrap();
 
         let mut block_env = BlockEnv::default();
