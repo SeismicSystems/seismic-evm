@@ -829,4 +829,55 @@ mod tests {
             "transaction one block past expiry should be rejected, but it was accepted"
         );
     }
+
+    /// A `SeismicEvmFactory`-built EVM must expose the tx-type precompile at `0x6A`: a
+    /// top-level call returns the transaction's EIP-2718 type byte as a 32-byte word — the
+    /// value `TxUtils.txType()` reads via `staticcall`. This is the standalone-crate proof
+    /// that re-pinning to the precompile revm actually wires `0x6A` into the factory.
+    #[test]
+    fn test_txtype_precompile_via_factory() {
+        fn txtype_via_factory(tx_type: u8) -> U256 {
+            let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+            let mock_keys = Box::leak(Box::new(PurposeKeys::well_known()));
+            let evm_factory = SeismicEvmFactory::new_with_purpose_keys(mock_keys);
+            let mut evm = evm_factory.create_evm(
+                &mut state,
+                EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            );
+
+            let tx = SeismicTransaction {
+                base: TxEnv {
+                    caller: Address::ZERO,
+                    kind: TxKind::Call(Address::with_last_byte(0x6A)),
+                    nonce: 0,
+                    gas_limit: 1_000_000,
+                    gas_price: 0,
+                    gas_priority_fee: None,
+                    value: U256::ZERO,
+                    data: Bytes::new(),
+                    chain_id: None,
+                    access_list: Default::default(),
+                    blob_hashes: Vec::new(),
+                    max_fee_per_blob_gas: 0,
+                    tx_type,
+                    authorization_list: Default::default(),
+                },
+                tx_hash: Default::default(),
+                decryption_failed: false,
+                signed_read: false,
+            };
+
+            let out = match evm.transact(tx).expect("transact to 0x6A").result {
+                ExecutionResult::Success { output, .. } => output.into_data(),
+                other => panic!("call to 0x6A precompile failed: {other:?}"),
+            };
+            assert_eq!(out.len(), 32, "tx-type precompile must return a 32-byte word");
+            U256::from_be_slice(&out)
+        }
+
+        // Seismic tx type (74 = 0x4A) → the precompile echoes 74, so isSeismicTx() is true.
+        assert_eq!(txtype_via_factory(0x4A), U256::from(0x4Au64));
+        // A standard (type 0) tx → 0, so isSeismicTx() is false off the encrypted path.
+        assert_eq!(txtype_via_factory(0), U256::ZERO);
+    }
 }
