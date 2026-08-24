@@ -30,12 +30,18 @@ use seismic_revm::{
 
 pub mod block;
 pub mod hardfork;
+pub mod keyring;
 
+pub use keyring::{
+    EpochKeyConflict, MissingEpochKeys, PurposeKeyring, RotationEntry, RotationSchedule,
+    ScheduleError,
+};
 pub use secp256k1;
 
-/// The per-purpose keys a node boots with. The node assembles this from its key
+/// The purpose keys of one key epoch. The node assembles these from its key
 /// custodian (TEE networks) or from the well-known keys (networks with no root
-/// key) and threads it by reference into the EVM factories.
+/// key) and threads them into the EVM factories through an epoch-keyed
+/// [`PurposeKeyring`].
 #[derive(Clone)]
 pub struct PurposeKeys {
     /// The network's tx-io keypair: wallets ECDH against the public half to
@@ -297,27 +303,48 @@ where
 }
 
 /// Factory producing [`SeismicEvm`]s.
+///
+/// Reads the epoch-keyed [`PurposeKeyring`] to seed each EVM's RNG-precompile
+/// ikm for the EVM's block. EVMs created here for **block execution** get their
+/// key material re-selected authoritatively by the block executor
+/// ([`block::SeismicBlockExecutor`]), which hard-errors on a missing epoch;
+/// the selection below is the best-effort path for non-consensus EVMs
+/// (RPC simulations such as `eth_call`), which must not fail on a not-yet-fetched
+/// epoch.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-// Factory that creates SeismicEVMs with pre-fetched purpose keys.
-// The purpose keys are provided at boot time and stored globally.
 pub struct SeismicEvmFactory {
-    purpose_keys: &'static PurposeKeys,
+    keyring: std::sync::Arc<PurposeKeyring>,
 }
 
 impl SeismicEvmFactory {
-    /// Creates a new [`SeismicEvmFactory`] with pre-fetched purpose keys.
-    pub fn new_with_purpose_keys(purpose_keys: &'static PurposeKeys) -> Self {
-        Self { purpose_keys }
+    /// Creates a new [`SeismicEvmFactory`] reading the given keyring.
+    pub fn new(keyring: std::sync::Arc<PurposeKeyring>) -> Self {
+        Self { keyring }
     }
 
-    /// Create an EVM using the stored RNG keypair.
+    /// Best-effort RNG ikm for the block in `input`, for non-consensus EVMs.
+    ///
+    /// Prefers the exact epoch of the block, then the current epoch. The final
+    /// zero fallback is unreachable in practice (every keyring constructor seeds
+    /// epoch 0) and only avoids a panic path; block execution never relies on
+    /// this — it re-selects with a hard error in the block executor.
+    fn simulation_rng_ikm(&self, input: &EvmEnv<SeismicSpecId>) -> [u8; 64] {
+        let number = input.block_env.number.saturating_to::<u64>();
+        self.keyring
+            .keys_for_block(number)
+            .or_else(|_| self.keyring.current().map(|(_, keys)| keys))
+            .map(|keys| keys.rng_ikm)
+            .unwrap_or([0u8; 64])
+    }
+
+    /// Create an EVM using the keyring's RNG ikm for the block in `input`.
     pub fn create_evm_with_rng_key<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
     ) -> SeismicEvm<DB, NoOpInspector> {
-        let context = self.create_context_with_rng_key();
+        let context = self.create_context_with_rng_key(&input);
 
         SeismicEvm {
             inner: context
@@ -329,19 +356,23 @@ impl SeismicEvmFactory {
         }
     }
 
-    /// Create SeismicContext with the RNG key from purpose keys
-    fn create_context_with_rng_key(&self) -> SeismicContext<EmptyDB> {
-        SeismicContext::seismic_with_rng_key(self.purpose_keys.rng_ikm)
+    /// Create SeismicContext with the RNG ikm selected from the keyring.
+    fn create_context_with_rng_key(
+        &self,
+        input: &EvmEnv<SeismicSpecId>,
+    ) -> SeismicContext<EmptyDB> {
+        SeismicContext::seismic_with_rng_key(self.simulation_rng_ikm(input))
     }
 
-    /// Create an EVM with inspector using the stored RNG keypair.
+    /// Create an EVM with inspector using the keyring's RNG ikm for the block in
+    /// `input`.
     pub fn create_evm_with_inspector_and_rng_key<DB: Database, I: Inspector<SeismicContext<DB>>>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
         inspector: I,
     ) -> SeismicEvm<DB, I> {
-        let context = self.create_context_with_rng_key();
+        let context = self.create_context_with_rng_key(&input);
 
         SeismicEvm {
             inner: context
