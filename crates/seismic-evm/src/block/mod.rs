@@ -882,7 +882,8 @@ mod tests {
         // Selector 0x01 → `signed_read && tx_type == 74`.
         assert_eq!(probe(0x4A, true, &[0x01]), U256::from(1u64));
         assert_eq!(probe(0x4A, false, &[0x01]), U256::ZERO);
-        // Raw signed_read=true on a non-Seismic type is normalized to 0 (isSignedRead => isSeismicTx).
+        // Raw signed_read=true on a non-Seismic type is normalized to 0 (isSignedRead =>
+        // isSeismicTx).
         assert_eq!(probe(0, true, &[0x01]), U256::ZERO);
         assert_eq!(probe(2, true, &[0x01]), U256::ZERO);
     }
