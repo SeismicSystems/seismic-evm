@@ -289,6 +289,23 @@ impl PurposeKeyring {
         }
     }
 
+    /// Copies the schedule, keys, and known tip into an independent keyring.
+    ///
+    /// The copy is taken under one read lock so it is a coherent view of the live
+    /// keyring. Subsequent updates in either keyring do not affect the other.
+    /// Use one snapshot per speculative execution request, sharing it across that
+    /// request's EVM and block-executor factories instead of cloning the live `Arc`.
+    pub fn snapshot(&self) -> Self {
+        let state = self.read();
+        Self {
+            inner: RwLock::new(KeyringState {
+                schedule: state.schedule.clone(),
+                keys: state.keys.clone(),
+                known_tip: state.known_tip,
+            }),
+        }
+    }
+
     fn read(&self) -> RwLockReadGuard<'_, KeyringState> {
         self.inner.read().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -420,6 +437,44 @@ fn keys_equal(a: &PurposeKeys, b: &PurposeKeys) -> bool {
 mod tests {
     use super::*;
     use secp256k1::{Secp256k1, SecretKey};
+
+    #[test]
+    fn snapshot_copies_state_and_isolates_updates_in_both_directions() {
+        let live = PurposeKeyring::single_epoch(test_keys(1));
+        live.apply_schedule(&schedule(&[(1, 100, 10), (2, 200, 110)])).unwrap();
+        live.insert_epoch(1, test_keys(2)).unwrap();
+        live.note_tip(120);
+
+        let snapshot = live.snapshot();
+        assert_eq!(snapshot.known_tip(), 120);
+        assert_eq!(snapshot.current().unwrap().0, 1);
+        assert_eq!(snapshot.pending(), Some((2, 200)));
+        assert_eq!(snapshot.unfetched_scheduled_epochs(), vec![2]);
+        for epoch in 0..=1 {
+            assert!(keys_equal(
+                &snapshot.keys_for_epoch(epoch).unwrap(),
+                &live.keys_for_epoch(epoch).unwrap(),
+            ));
+        }
+
+        // A simulation can learn/fetch/activate rotations without changing live state.
+        snapshot.apply_schedule(&schedule(&[(1, 100, 10), (2, 200, 110), (3, 300, 210)])).unwrap();
+        snapshot.insert_epoch(2, test_keys(3)).unwrap();
+        snapshot.note_tip(220);
+        assert_eq!(live.schedule_len(), 2);
+        assert_eq!(live.known_tip(), 120);
+        assert!(live.keys_for_epoch(2).is_none());
+        assert_eq!(live.current().unwrap().0, 1);
+
+        // Later canonical updates must not leak into an already-running simulation.
+        live.apply_schedule(&schedule(&[(1, 100, 10), (2, 200, 110), (3, 400, 250)])).unwrap();
+        live.insert_epoch(3, test_keys(4)).unwrap();
+        live.note_tip(410);
+        assert_eq!(snapshot.activation_block_of(3), Some(300));
+        assert_eq!(snapshot.known_tip(), 220);
+        assert!(snapshot.keys_for_epoch(3).is_none());
+        assert_eq!(snapshot.current().unwrap().0, 2);
+    }
 
     fn test_keys(seed: u8) -> PurposeKeys {
         let sk = SecretKey::from_byte_array(&[seed; 32]).unwrap();
