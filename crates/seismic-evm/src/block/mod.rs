@@ -829,4 +829,62 @@ mod tests {
             "transaction one block past expiry should be rejected, but it was accepted"
         );
     }
+
+    /// A `SeismicEvmFactory`-built EVM must expose the tx-type precompile at `0x6A`: a
+    /// top-level call returns the transaction's EIP-2718 type byte as a 32-byte word — the
+    /// value `TxUtils.txType()` reads via `staticcall`. This is the standalone-crate proof
+    /// that re-pinning to the precompile revm actually wires `0x6A` into the factory.
+    #[test]
+    fn test_txtype_precompile_via_factory() {
+        fn probe(tx_type: u8, signed_read: bool, selector: &[u8]) -> U256 {
+            let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+            let mock_keys = Box::leak(Box::new(PurposeKeys::well_known()));
+            let evm_factory = SeismicEvmFactory::new_with_purpose_keys(mock_keys);
+            let mut evm = evm_factory.create_evm(
+                &mut state,
+                EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            );
+
+            let tx = SeismicTransaction {
+                base: TxEnv {
+                    caller: Address::ZERO,
+                    kind: TxKind::Call(Address::with_last_byte(0x6A)),
+                    nonce: 0,
+                    gas_limit: 1_000_000,
+                    gas_price: 0,
+                    gas_priority_fee: None,
+                    value: U256::ZERO,
+                    data: Bytes::copy_from_slice(selector),
+                    chain_id: None,
+                    access_list: Default::default(),
+                    blob_hashes: Vec::new(),
+                    max_fee_per_blob_gas: 0,
+                    tx_type,
+                    authorization_list: Default::default(),
+                },
+                tx_hash: Default::default(),
+                decryption_failed: false,
+                signed_read,
+            };
+
+            let out = match evm.transact(tx).expect("transact to 0x6A").result {
+                ExecutionResult::Success { output, .. } => output.into_data(),
+                other => panic!("call to 0x6A precompile failed: {other:?}"),
+            };
+            assert_eq!(out.len(), 32, "tx-context precompile must return a 32-byte word");
+            U256::from_be_slice(&out)
+        }
+
+        // Empty selector → the raw EIP-2718 tx type.
+        assert_eq!(probe(0x4A, false, &[]), U256::from(0x4Au64));
+        assert_eq!(probe(0, false, &[]), U256::ZERO);
+
+        // Selector 0x01 → `signed_read && tx_type == 74`.
+        assert_eq!(probe(0x4A, true, &[0x01]), U256::from(1u64));
+        assert_eq!(probe(0x4A, false, &[0x01]), U256::ZERO);
+        // Raw signed_read=true on a non-Seismic type is normalized to 0 (isSignedRead =>
+        // isSeismicTx).
+        assert_eq!(probe(0, true, &[0x01]), U256::ZERO);
+        assert_eq!(probe(2, true, &[0x01]), U256::ZERO);
+    }
 }
