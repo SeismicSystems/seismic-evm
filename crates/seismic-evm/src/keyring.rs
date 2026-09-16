@@ -7,16 +7,16 @@
 //! through the [`PurposeKeyring`] per block instead of holding a single static key
 //! bundle.
 //!
-//! This module holds no chain knowledge: seismic-reth reads the on-chain
-//! `KeyRotationRegistry` and keeps the keyring's [`RotationSchedule`] and key
-//! material up to date (boot reconciliation + rotation watcher); the factories in
-//! this crate only ever *read* it.
+//! Key material is additive and shared; canonical metadata is replaceable and
+//! used only for RPC/pool policy. Execution resolves its epoch through the registry
+//! decoder against its own parent-state database and requests material by epoch.
 
 use crate::PurposeKeys;
+use alloy_primitives::B256;
 use core::fmt;
 use std::{
-    collections::BTreeMap,
-    sync::{RwLock, RwLockReadGuard, RwLockWriteGuard},
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     vec::Vec,
 };
 
@@ -60,9 +60,8 @@ pub enum ScheduleError {
         /// Its announcement block.
         announced_at_block: u64,
     },
-    /// A newer schedule disagrees with an already-known entry. The registry is
-    /// append-only, so this can only mean a bug or a deeper-than-allowed reorg —
-    /// both must be surfaced, never silently adopted.
+    /// A proposed extension disagrees with an existing entry on the same branch.
+    /// Canonical reorg reconciliation replaces a schedule instead of extending it.
     DivergentHistory {
         /// Index of the first disagreeing entry.
         index: usize,
@@ -245,23 +244,41 @@ impl RotationSchedule {
     }
 }
 
+/// Replaceable canonical metadata, read from one specific head's state.
+/// This view is for RPC and pool policy, never for block execution.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CanonicalRotationView {
+    /// Hash whose post-state supplied the schedule.
+    pub head_hash: B256,
+    /// Number of that head (may decrease on reorg).
+    pub head_number: u64,
+    /// Full schedule in that head's post-state.
+    pub schedule: RotationSchedule,
+}
+
 struct KeyringState {
-    schedule: RotationSchedule,
-    /// Epoch -> keys. Never evicted: old epochs decrypt historical transactions and
-    /// reproduce historical RNG outputs during sync.
     keys: BTreeMap<u64, PurposeKeys>,
-    /// The highest canonical tip this keyring has been told about (monotonic).
-    /// Drives [`PurposeKeyring::current`] and [`PurposeKeyring::pending`].
-    known_tip: u64,
+    requested: BTreeSet<u64>,
+}
+
+/// Owned key selection fixed for the lifetime of one block execution attempt.
+#[derive(Debug, Clone)]
+pub struct BlockKeySelection {
+    /// Epoch resolved from the actual parent state.
+    pub epoch: u64,
+    /// The keys used for both RNG and every transaction's decryption.
+    pub keys: PurposeKeys,
 }
 
 /// Shared, swappable purpose-key state: the rotation schedule and the key material
 /// for every known epoch. Cheap to clone behind an `Arc`; all methods take `&self`.
 ///
-/// The block executor selects keys through [`PurposeKeyring::keys_for_block`] at
-/// block start; a missing epoch is a hard execution error, never a fallback.
+/// The block executor resolves its epoch from parent state, then uses
+/// [`PurposeKeyring::select_epoch`]. It never selects from canonical metadata.
 pub struct PurposeKeyring {
-    inner: RwLock<KeyringState>,
+    inner: Arc<RwLock<KeyringState>>,
+    canonical: RwLock<CanonicalRotationView>,
+    request_fetches: bool,
 }
 
 impl fmt::Debug for PurposeKeyring {
@@ -269,9 +286,8 @@ impl fmt::Debug for PurposeKeyring {
         let state = self.read();
         // Deliberately omits the key material.
         f.debug_struct("PurposeKeyring")
-            .field("schedule", &state.schedule)
+            .field("canonical", &self.canonical_view())
             .field("epochs_with_keys", &state.keys.keys().collect::<Vec<_>>())
-            .field("known_tip", &state.known_tip)
             .finish()
     }
 }
@@ -281,28 +297,26 @@ impl PurposeKeyring {
     /// state every node boots with, and the whole story for dev nodes and tests.
     pub fn single_epoch(keys: PurposeKeys) -> Self {
         Self {
-            inner: RwLock::new(KeyringState {
-                schedule: RotationSchedule::new(),
+            inner: Arc::new(RwLock::new(KeyringState {
                 keys: BTreeMap::from([(0, keys)]),
-                known_tip: 0,
-            }),
+                requested: BTreeSet::new(),
+            })),
+            canonical: RwLock::new(CanonicalRotationView::default()),
+            request_fetches: true,
         }
     }
 
-    /// Copies the schedule, keys, and known tip into an independent keyring.
+    /// Creates a simulation handle sharing only additive key material.
     ///
-    /// The copy is taken under one read lock so it is a coherent view of the live
-    /// keyring. Subsequent updates in either keyring do not affect the other.
-    /// Use one snapshot per speculative execution request, sharing it across that
-    /// request's EVM and block-executor factories instead of cloning the live `Arc`.
+    /// It inherits no canonical schedule and cannot enqueue fetch requests. Each
+    /// simulated block resolves its schedule from its own parent overlay. Material
+    /// fetched by the live worker can become available, but can never change an
+    /// already-initialized execution attempt's epoch or keys.
     pub fn snapshot(&self) -> Self {
-        let state = self.read();
         Self {
-            inner: RwLock::new(KeyringState {
-                schedule: state.schedule.clone(),
-                keys: state.keys.clone(),
-                known_tip: state.known_tip,
-            }),
+            inner: self.inner.clone(),
+            canonical: RwLock::new(CanonicalRotationView::default()),
+            request_fetches: false,
         }
     }
 
@@ -314,54 +328,34 @@ impl PurposeKeyring {
         self.inner.write().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// The epoch active for `block` per the known schedule (0 while no rotation is
-    /// announced).
+    /// The epoch at `block` in the canonical metadata snapshot. This is not an
+    /// execution API: a competing branch may have a different epoch at that height.
     pub fn epoch_for_block(&self, block: u64) -> u64 {
-        self.read().schedule.epoch_at_block(block)
-    }
-
-    /// The keys for the epoch active at `block`. Hard error when the epoch's keys
-    /// have not been fetched — callers must never substitute another epoch.
-    pub fn keys_for_block(&self, block: u64) -> Result<PurposeKeys, MissingEpochKeys> {
-        let state = self.read();
-        let epoch = state.schedule.epoch_at_block(block);
-        state.keys.get(&epoch).cloned().ok_or(MissingEpochKeys { epoch, block })
+        self.canonical_view().schedule.epoch_at_block(block)
     }
 
     /// The epoch and keys active at the last known canonical tip. This is what RPC
     /// advertises (`seismic_getTeePublicKey`) and decrypts signed reads with.
     pub fn current(&self) -> Result<(u64, PurposeKeys), MissingEpochKeys> {
-        let state = self.read();
-        let epoch = state.schedule.epoch_at_block(state.known_tip);
-        state
-            .keys
-            .get(&epoch)
-            .cloned()
+        let view = self.canonical_view();
+        let epoch = view.schedule.epoch_at_block(view.head_number);
+        self.keys_for_epoch(epoch)
             .map(|keys| (epoch, keys))
-            .ok_or(MissingEpochKeys { epoch, block: state.known_tip })
+            .ok_or(MissingEpochKeys { epoch, block: view.head_number })
     }
 
     /// The soonest announced-but-not-yet-activated rotation as of the known tip, as
     /// `(epoch, activation_block)`. Drives the pool's expiry boundary rule.
     pub fn pending(&self) -> Option<(u64, u64)> {
-        let state = self.read();
-        state
-            .schedule
-            .pending_after(state.known_tip)
+        let view = self.canonical_view();
+        view.schedule
+            .pending_after(view.head_number)
             .map(|entry| (entry.epoch, entry.activation_block))
     }
 
-    /// Records a canonical tip observation (monotonic max).
-    pub fn note_tip(&self, tip: u64) {
-        let mut state = self.write();
-        if tip > state.known_tip {
-            state.known_tip = tip;
-        }
-    }
-
-    /// The highest canonical tip this keyring has been told about.
+    /// The head number in the canonical view (may decrease after reconciliation).
     pub fn known_tip(&self) -> u64 {
-        self.read().known_tip
+        self.canonical_view().head_number
     }
 
     /// Inserts key material for an epoch. Idempotent: re-inserting identical keys
@@ -374,20 +368,15 @@ impl PurposeKeyring {
             Some(_) => Err(EpochKeyConflict { epoch }),
             None => {
                 state.keys.insert(epoch, keys);
+                state.requested.remove(&epoch);
                 Ok(true)
             }
         }
     }
 
-    /// Extends the schedule to match a newer read of the registry (append-only
-    /// merge). Returns the number of newly learned rotations.
-    pub fn apply_schedule(&self, newer: &RotationSchedule) -> Result<usize, ScheduleError> {
-        self.write().schedule.extend_to(newer)
-    }
-
     /// Number of rotations in the known schedule.
     pub fn schedule_len(&self) -> usize {
-        self.read().schedule.len()
+        self.canonical_view().schedule.len()
     }
 
     /// The keys for a specific epoch, if fetched.
@@ -401,7 +390,7 @@ impl PurposeKeyring {
         if epoch == 0 {
             return Some(0);
         }
-        self.read()
+        self.canonical_view()
             .schedule
             .entries()
             .iter()
@@ -409,22 +398,66 @@ impl PurposeKeyring {
             .map(|entry| entry.activation_block)
     }
 
-    /// Whether the known schedule provably determines the epoch of `block` without
-    /// consulting chain state: true when a known rotation activates *after* `block`
-    /// (any not-yet-known announcement must activate even later, by the announcement
-    /// delay), or when `block` is at or below one past the known tip (the schedule
-    /// was reconciled against canonical state at least that fresh).
-    pub fn schedule_covers_block(&self, block: u64) -> bool {
+    /// Atomically publishes a complete canonical view, including shorter histories,
+    /// same-length replacements and lower heads. The serialized watcher is the writer.
+    pub fn replace_canonical_view(&self, view: CanonicalRotationView) {
+        *self.canonical.write().unwrap_or_else(|err| err.into_inner()) = view;
+    }
+
+    /// One coherent RPC/pool metadata snapshot. Key inventory is additive and separate.
+    pub fn canonical_view(&self) -> CanonicalRotationView {
+        self.canonical.read().unwrap_or_else(|err| err.into_inner()).clone()
+    }
+
+    /// Selects keys for an epoch already resolved from the execution's parent state.
+    /// Missing live-execution epochs are deduplicated for the background fetcher;
+    /// isolated simulations cannot enqueue work, even though key material is shared.
+    pub fn select_epoch(
+        &self,
+        epoch: u64,
+        block: u64,
+    ) -> Result<BlockKeySelection, MissingEpochKeys> {
+        let mut state = self.write();
+        if let Some(keys) = state.keys.get(&epoch) {
+            return Ok(BlockKeySelection { epoch, keys: keys.clone() });
+        }
+        if self.request_fetches {
+            state.requested.insert(epoch);
+        }
+        Err(MissingEpochKeys { epoch, block })
+    }
+
+    /// Missing execution-requested epochs; retained across failed fetch attempts.
+    pub fn requested_epochs(&self) -> Vec<u64> {
+        self.read().requested.iter().copied().collect()
+    }
+
+    /// Deduplicated union of canonical and execution-requested missing epochs.
+    pub fn unfetched_epochs(&self) -> Vec<u64> {
+        let view = self.canonical_view();
         let state = self.read();
-        block <= state.known_tip.saturating_add(1)
-            || state.schedule.pending_after(block.saturating_sub(1)).is_some()
+        view.schedule
+            .entries()
+            .iter()
+            .map(|entry| entry.epoch)
+            .chain(state.requested.iter().copied())
+            .filter(|epoch| !state.keys.contains_key(epoch))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Scheduled epochs (1..=schedule len) whose keys are not yet in the keyring —
     /// the rotation watcher's fetch work-list. Epoch 0 is excluded (seeded at boot).
     pub fn unfetched_scheduled_epochs(&self) -> Vec<u64> {
+        let view = self.canonical_view();
         let state = self.read();
-        (1..=state.schedule.len() as u64).filter(|epoch| !state.keys.contains_key(epoch)).collect()
+        view.schedule
+            .entries()
+            .iter()
+            .map(|entry| entry.epoch)
+            .filter(|epoch| !state.keys.contains_key(epoch))
+            .collect()
     }
 }
 
@@ -436,44 +469,34 @@ fn keys_equal(a: &PurposeKeys, b: &PurposeKeys) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
     use secp256k1::{Secp256k1, SecretKey};
 
     #[test]
-    fn snapshot_copies_state_and_isolates_updates_in_both_directions() {
+    fn simulation_shares_only_material_and_cannot_request_fetches() {
         let live = PurposeKeyring::single_epoch(test_keys(1));
-        live.apply_schedule(&schedule(&[(1, 100, 10), (2, 200, 110)])).unwrap();
+        live.replace_canonical_view(CanonicalRotationView {
+            head_hash: B256::repeat_byte(1),
+            head_number: 120,
+            schedule: schedule(&[(1, 100, 10), (2, 200, 110)]),
+        });
         live.insert_epoch(1, test_keys(2)).unwrap();
-        live.note_tip(120);
-
         let snapshot = live.snapshot();
-        assert_eq!(snapshot.known_tip(), 120);
-        assert_eq!(snapshot.current().unwrap().0, 1);
-        assert_eq!(snapshot.pending(), Some((2, 200)));
-        assert_eq!(snapshot.unfetched_scheduled_epochs(), vec![2]);
-        for epoch in 0..=1 {
-            assert!(keys_equal(
-                &snapshot.keys_for_epoch(epoch).unwrap(),
-                &live.keys_for_epoch(epoch).unwrap(),
-            ));
+        assert_eq!(snapshot.canonical_view(), CanonicalRotationView::default());
+        assert!(keys_equal(&snapshot.keys_for_epoch(1).unwrap(), &live.keys_for_epoch(1).unwrap()));
+        assert!(snapshot.select_epoch(2, 200).is_err());
+        assert!(live.requested_epochs().is_empty());
+        live.insert_epoch(2, test_keys(3)).unwrap();
+        assert_eq!(snapshot.select_epoch(2, 200).unwrap().keys.rng_ikm, [3; 64]);
+        assert_eq!(snapshot.canonical_view(), CanonicalRotationView::default());
+    }
+
+    fn view(head_number: u64) -> CanonicalRotationView {
+        CanonicalRotationView {
+            head_number,
+            head_hash: B256::from(U256::from(head_number)),
+            schedule: schedule(&[(1, 100, 10)]),
         }
-
-        // A simulation can learn/fetch/activate rotations without changing live state.
-        snapshot.apply_schedule(&schedule(&[(1, 100, 10), (2, 200, 110), (3, 300, 210)])).unwrap();
-        snapshot.insert_epoch(2, test_keys(3)).unwrap();
-        snapshot.note_tip(220);
-        assert_eq!(live.schedule_len(), 2);
-        assert_eq!(live.known_tip(), 120);
-        assert!(live.keys_for_epoch(2).is_none());
-        assert_eq!(live.current().unwrap().0, 1);
-
-        // Later canonical updates must not leak into an already-running simulation.
-        live.apply_schedule(&schedule(&[(1, 100, 10), (2, 200, 110), (3, 400, 250)])).unwrap();
-        live.insert_epoch(3, test_keys(4)).unwrap();
-        live.note_tip(410);
-        assert_eq!(snapshot.activation_block_of(3), Some(300));
-        assert_eq!(snapshot.known_tip(), 220);
-        assert!(snapshot.keys_for_epoch(3).is_none());
-        assert_eq!(snapshot.current().unwrap().0, 2);
     }
 
     fn test_keys(seed: u8) -> PurposeKeys {
@@ -568,7 +591,7 @@ mod tests {
     fn single_epoch_keyring_serves_epoch_zero_everywhere() {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
         assert_eq!(keyring.epoch_for_block(u64::MAX), 0);
-        assert_eq!(keyring.keys_for_block(12345).unwrap().rng_ikm, [1; 64]);
+        assert_eq!(keyring.select_epoch(0, 12345).unwrap().keys.rng_ikm, [1; 64]);
         let (epoch, keys) = keyring.current().unwrap();
         assert_eq!(epoch, 0);
         assert_eq!(keys.rng_ikm, [1; 64]);
@@ -579,16 +602,16 @@ mod tests {
     #[test]
     fn missing_epoch_is_a_hard_error_until_fetched() {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
-        keyring.apply_schedule(&schedule(&[(1, 100, 10)])).unwrap();
-        assert_eq!(keyring.keys_for_block(99).unwrap().rng_ikm, [1; 64]);
+        keyring.replace_canonical_view(view(99));
+        assert_eq!(keyring.select_epoch(0, 99).unwrap().keys.rng_ikm, [1; 64]);
         assert_eq!(
-            keyring.keys_for_block(100).map(|_| ()),
+            keyring.select_epoch(1, 100).map(|_| ()),
             Err(MissingEpochKeys { epoch: 1, block: 100 })
         );
         assert_eq!(keyring.unfetched_scheduled_epochs(), vec![1]);
 
         assert!(keyring.insert_epoch(1, test_keys(2)).unwrap());
-        assert_eq!(keyring.keys_for_block(100).unwrap().rng_ikm, [2; 64]);
+        assert_eq!(keyring.select_epoch(1, 100).unwrap().keys.rng_ikm, [2; 64]);
         assert!(keyring.unfetched_scheduled_epochs().is_empty());
     }
 
@@ -602,22 +625,21 @@ mod tests {
     }
 
     #[test]
-    fn current_and_pending_follow_the_noted_tip() {
+    fn current_and_pending_follow_the_reconciled_head() {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
-        keyring.apply_schedule(&schedule(&[(1, 100, 10)])).unwrap();
         keyring.insert_epoch(1, test_keys(2)).unwrap();
 
-        keyring.note_tip(50);
+        keyring.replace_canonical_view(view(50));
         assert_eq!(keyring.current().unwrap().0, 0);
         assert_eq!(keyring.pending(), Some((1, 100)));
 
-        keyring.note_tip(100);
+        keyring.replace_canonical_view(view(100));
         assert_eq!(keyring.current().unwrap().0, 1);
         assert_eq!(keyring.pending(), None);
 
-        // Tips are monotonic: a stale observation cannot roll the epoch back.
-        keyring.note_tip(10);
-        assert_eq!(keyring.current().unwrap().0, 1);
+        // Lower canonical heads are allowed on a reorg.
+        keyring.replace_canonical_view(view(10));
+        assert_eq!(keyring.current().unwrap().0, 0);
     }
 
     #[test]
@@ -625,27 +647,22 @@ mod tests {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
         assert_eq!(keyring.activation_block_of(0), Some(0));
         assert_eq!(keyring.activation_block_of(1), None);
-        keyring.apply_schedule(&schedule(&[(1, 100, 10)])).unwrap();
+        keyring.replace_canonical_view(view(50));
         assert_eq!(keyring.activation_block_of(1), Some(100));
     }
 
     #[test]
-    fn schedule_coverage_tracks_tip_and_pending() {
+    fn requests_are_deduplicated_and_survive_reconciliation() {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
-        // Fresh keyring: only the genesis vicinity is provably covered.
-        assert!(keyring.schedule_covers_block(0));
-        assert!(keyring.schedule_covers_block(1));
-        assert!(!keyring.schedule_covers_block(500));
-
-        // A live node's tip makes everything at or below tip + 1 covered.
-        keyring.note_tip(499);
-        assert!(keyring.schedule_covers_block(500));
-        assert!(!keyring.schedule_covers_block(501));
-
-        // A known future activation covers every block before it, even past tip.
-        keyring.apply_schedule(&schedule(&[(1, 1000, 600)])).unwrap();
-        assert!(keyring.schedule_covers_block(999));
-        assert!(keyring.schedule_covers_block(1000));
-        assert!(!keyring.schedule_covers_block(1001));
+        for _ in 0..3 {
+            assert!(keyring.select_epoch(1, 200).is_err());
+        }
+        assert_eq!(keyring.requested_epochs(), vec![1]);
+        keyring.replace_canonical_view(CanonicalRotationView::default());
+        assert_eq!(keyring.unfetched_epochs(), vec![1]);
+        keyring.insert_epoch(1, test_keys(2)).unwrap();
+        assert!(keyring.unfetched_epochs().is_empty());
+        assert!(keyring.requested_epochs().is_empty());
+        assert_eq!(keyring.select_epoch(1, 200).unwrap().epoch, 1);
     }
 }

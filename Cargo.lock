@@ -355,6 +355,7 @@ dependencies = [
  "seismic-alloy-consensus",
  "seismic-crypto",
  "seismic-revm",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

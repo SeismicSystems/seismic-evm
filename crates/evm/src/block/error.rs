@@ -134,6 +134,17 @@ impl BlockExecutionError {
         Self::Internal(InternalBlockExecutionError::other(error))
     }
 
+    /// A temporary local resource failure. The block is neither valid nor invalid
+    /// yet; discard this attempt and retry after the resource becomes available.
+    pub fn retryable<E: core::error::Error + Send + Sync + 'static>(error: E) -> Self {
+        Self::other(RetryableBlockExecutionError(Box::new(error)))
+    }
+
+    /// Whether this execution attempt failed because a local resource is missing.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::Internal(err) if err.is_other::<RetryableBlockExecutionError>())
+    }
+
     /// Create a new [`BlockExecutionError::Internal`] variant, containing a
     /// [`InternalBlockExecutionError::Other`] error with the given message.
     pub fn msg(msg: impl core::fmt::Display) -> Self {
@@ -163,6 +174,12 @@ impl BlockExecutionError {
         }
     }
 }
+
+// Kept inside Other so retry classification does not enlarge the execution-error
+// enum propagated throughout the client.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+struct RetryableBlockExecutionError(Box<dyn core::error::Error + Send + Sync + 'static>);
 
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Debug, thiserror::Error)]
