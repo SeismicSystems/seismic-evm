@@ -2,7 +2,7 @@
 
 use crate::{
     hardfork::{SeismicChainHardforks, SeismicHardforks},
-    SeismicEvmFactory,
+    BlockKeySelection, PurposeKeyring, SeismicEvmFactory,
 };
 use alloy_consensus::{Transaction, TxReceipt};
 use alloy_eips::Encodable2718;
@@ -20,6 +20,7 @@ use alloy_evm::{
 use alloy_primitives::Log;
 pub use receipt_builder::SeismicAlloyReceiptBuilder;
 use revm::{database::State, Inspector};
+use std::sync::Arc;
 pub mod receipt_builder;
 use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
@@ -40,11 +41,18 @@ use seismic_revm::{transaction::abstraction::SeismicTransaction, SeismicChain};
 pub trait SeismicChainAccess {
     /// Returns a mutable reference to the [`SeismicChain`].
     fn seismic_chain_mut(&mut self) -> &mut SeismicChain;
+
+    /// Resolve and freeze keys from the EVM's parent-state database.
+    fn initialize_block_keys(&mut self) -> Result<BlockKeySelection, BlockExecutionError>;
 }
 
 impl<DB: Database, I, P> SeismicChainAccess for crate::SeismicEvm<DB, I, P> {
     fn seismic_chain_mut(&mut self) -> &mut SeismicChain {
         self.ctx_mut().chain_mut()
+    }
+
+    fn initialize_block_keys(&mut self) -> Result<BlockKeySelection, BlockExecutionError> {
+        self.initialize_keys().cloned().map_err(crate::KeySelectionError::into_block_error)
     }
 }
 
@@ -80,7 +88,8 @@ where
     R::Receipt: std::fmt::Debug,
 {
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
-    purpose_keys: &'static crate::PurposeKeys,
+    /// Owned selection; never re-read shared metadata while executing transactions.
+    selected: Option<BlockKeySelection>,
 }
 
 impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
@@ -88,17 +97,19 @@ where
     E: Evm,
     R: ReceiptBuilder,
     R::Receipt: std::fmt::Debug,
-    Spec: SeismicHardforks + Clone,
 {
     /// Creates a new [`SeismicBlockExecutor`].
-    pub fn new(
-        evm: E,
-        ctx: SeismicBlockExecutionCtx<'a>,
-        spec: Spec,
-        receipt_builder: R,
-        purpose_keys: &'static crate::PurposeKeys,
-    ) -> Self {
-        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), purpose_keys }
+    pub fn new(evm: E, ctx: SeismicBlockExecutionCtx<'a>, spec: Spec, receipt_builder: R) -> Self
+    where
+        Spec: Clone,
+    {
+        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), selected: None }
+    }
+
+    fn selected_keys(&self) -> Result<&BlockKeySelection, BlockExecutionError> {
+        self.selected
+            .as_ref()
+            .ok_or_else(|| BlockExecutionError::msg("block purpose-key selection is uninitialized"))
     }
 }
 
@@ -192,9 +203,16 @@ where
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        // Resolve before any pre-execution state changes. The EVM also freezes
+        // this selection so system calls and raw transaction execution agree.
+        self.selected = None;
+        let selected = self.evm_mut().initialize_block_keys()?;
+        self.evm_mut().seismic_chain_mut().set_rng_key(selected.keys.rng_ikm);
         let parent_hash = self.inner.ctx.parent_hash;
         self.evm_mut().seismic_chain_mut().set_parent_block_hash(parent_hash);
-        self.inner.apply_pre_execution_changes()
+        self.inner.apply_pre_execution_changes()?;
+        self.selected = Some(selected);
+        Ok(())
     }
 
     fn execute_transaction_with_commit_condition(
@@ -202,6 +220,7 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
+        let tx_io_sk = self.selected_keys()?.keys.tx_io.secret_key();
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
@@ -217,7 +236,6 @@ where
             })?;
 
         let signer = RecoveredTx::signer(&tx);
-        let tx_io_sk = self.purpose_keys.tx_io.secret_key();
         let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
             Ok(plaintext_base) => {
                 let recovered = Recovered::new_unchecked(plaintext_base, *signer);
@@ -246,6 +264,7 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
+        let tx_io_sk = self.selected_keys()?.keys.tx_io.secret_key();
         let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
         let current_block: u64 = self.evm().block().number.saturating_to();
         let parent_hash = self.inner.ctx.parent_hash;
@@ -261,7 +280,6 @@ where
             })?;
 
         let signer = RecoveredTx::signer(&tx);
-        let tx_io_sk = self.purpose_keys.tx_io.secret_key();
         let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
             Ok(plaintext_base) => {
                 let recovered = Recovered::new_unchecked(plaintext_base, *signer);
@@ -280,6 +298,7 @@ where
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
+        self.selected_keys()?;
         self.inner.finish()
     }
 
@@ -309,20 +328,20 @@ pub struct SeismicBlockExecutorFactory<
     spec: Spec,
     /// EVM factory.
     evm_factory: EvmFactory,
-    /// Purpose keys for decryption.
-    pub purpose_keys: &'static crate::PurposeKeys,
+    /// Epoch-keyed purpose keys; executors select their block's epoch through it.
+    pub keyring: Arc<PurposeKeyring>,
 }
 
 impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new [`SeismicBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`SeismicReceiptBuilder`].
-    pub const fn new(
+    pub fn new(
         receipt_builder: R,
         spec: Spec,
         evm_factory: EvmFactory,
-        purpose_keys: &'static crate::PurposeKeys,
+        keyring: Arc<PurposeKeyring>,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory, purpose_keys }
+        Self { receipt_builder, spec, evm_factory, keyring }
     }
 
     /// Exposes the receipt builder.
@@ -369,14 +388,14 @@ where
         DB: Database + 'a,
         I: Inspector<<SeismicEvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
-        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder, self.purpose_keys)
+        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PurposeKeys;
+    use crate::{CanonicalRotationView, PurposeKeys, RotationEntry, RotationSchedule};
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
     use alloy_primitives::{aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256};
@@ -396,6 +415,27 @@ mod tests {
     use alloy_primitives::Address;
     use seismic_alloy_consensus::SeismicTxEnvelope;
 
+    fn rotation_db() -> InMemoryDB {
+        let mut db = InMemoryDB::default();
+        db.insert_account_info(
+            crate::registry::KEY_ROTATION_REGISTRY,
+            revm::state::AccountInfo::default(),
+        );
+        db.insert_account_storage(
+            crate::registry::KEY_ROTATION_REGISTRY,
+            U256::from_be_bytes(crate::registry::ROTATIONS_LEN_SLOT.0),
+            U256::from(1).into(),
+        )
+        .unwrap();
+        db.insert_account_storage(
+            crate::registry::KEY_ROTATION_REGISTRY,
+            U256::from_be_bytes(crate::registry::rotation_entry_slot(0).0),
+            U256::from_limbs([1, 100, 10, 0]).into(),
+        )
+        .unwrap();
+        db
+    }
+
     fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
         let _signature = signing_key
             .clone()
@@ -406,8 +446,8 @@ mod tests {
         let _signature = _signature.0;
 
         let signature = Signature::new(
-            U256::from_be_slice(_signature.r().to_bytes().as_slice()),
-            U256::from_be_slice(_signature.s().to_bytes().as_slice()),
+            U256::from_be_slice(&_signature.r().to_bytes()),
+            U256::from_be_slice(&_signature.s().to_bytes()),
             recoverid.is_y_odd(),
         );
 
@@ -425,7 +465,8 @@ mod tests {
         signing_key: SigningKey,
         executor_factory: SeismicBlockExecutorFactory,
         ctx: SeismicBlockExecutionCtx<'a>,
-        purpose_keys: &'static crate::PurposeKeys,
+        purpose_keys: PurposeKeys,
+        keyring: Arc<PurposeKeyring>,
         encryption_pubkey: PublicKey,
         encryption_sk: SecretKey,
         encryption_nonce: Nonce,
@@ -442,22 +483,22 @@ mod tests {
         let secp = Secp256k1::new();
         let encryption_pubkey = PublicKey::from_secret_key(&secp, &encryption_sk);
 
-        // Fetch purpose keys for testing and leak to get 'static lifetime
-        let mock_keys = Box::leak(Box::new(PurposeKeys::well_known()));
-        let evm_factory = SeismicEvmFactory::new_with_purpose_keys(mock_keys);
+        let mock_keys = PurposeKeys::well_known();
+        let keyring = Arc::new(PurposeKeyring::single_epoch(mock_keys.clone()));
+        let evm_factory = SeismicEvmFactory::new(keyring.clone());
 
         state.increment_balances(vec![(signer, 1000000000000000000)]).unwrap();
         let executor_factory = SeismicBlockExecutorFactory::new(
             SeismicAlloyReceiptBuilder::default(),
             SeismicChainHardforks::seismic_mainnet(),
             evm_factory.clone(),
-            mock_keys,
+            keyring.clone(),
         );
 
         let ctx = SeismicBlockExecutionCtx {
             withdrawals: None,
             parent_hash: B256::ZERO,
-            parent_beacon_block_root: None,
+            parent_beacon_block_root: Some(B256::ZERO),
             ommers: &[],
         };
         SetupTest {
@@ -468,6 +509,7 @@ mod tests {
             executor_factory,
             ctx,
             purpose_keys: mock_keys,
+            keyring,
             encryption_nonce: Nonce::new_rand(),
             evm_factory,
         }
@@ -529,6 +571,84 @@ mod tests {
     }
 
     #[test]
+    fn watcher_update_cannot_change_selected_block_keys() {
+        for use_result_closure in [false, true] {
+            let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+            let setup = setup_test(&mut state);
+            let env = EvmEnv::new(
+                CfgEnv::new_with_spec(SeismicSpecId::MERCURY),
+                BlockEnv { number: U256::from(100), ..Default::default() },
+            );
+            let evm = setup.evm_factory.create_evm(&mut state, env);
+            let mut ctx = setup.ctx.clone();
+            ctx.parent_beacon_block_root = Some(B256::ZERO);
+            let mut executor = setup.executor_factory.create_executor(evm, ctx);
+            executor.apply_pre_execution_changes().unwrap();
+            let keyring = setup.keyring.clone();
+            std::thread::spawn(move || {
+                let sk = SecretKey::from_byte_array(&[42; 32]).unwrap();
+                keyring
+                    .insert_epoch(
+                        1,
+                        PurposeKeys {
+                            tx_io: secp256k1::Keypair::from_secret_key(&Secp256k1::new(), &sk),
+                            rng_ikm: [42; 64],
+                        },
+                    )
+                    .unwrap();
+                keyring.replace_canonical_view(CanonicalRotationView {
+                    head_hash: B256::repeat_byte(1),
+                    head_number: 100,
+                    schedule: RotationSchedule::from_entries([RotationEntry {
+                        epoch: 1,
+                        activation_block: 100,
+                        announced_at_block: 10,
+                    }])
+                    .unwrap(),
+                });
+            })
+            .join()
+            .unwrap();
+            let envelope = get_tx_envelope(&setup, sample_seismic_tx(&setup, "frozen epoch zero"));
+            let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+            if use_result_closure {
+                executor.execute_transaction_with_result_closure(recovered, |_| {}).unwrap();
+            } else {
+                executor.execute_transaction(recovered).unwrap();
+            }
+            let (_, result) = executor.finish().unwrap();
+            assert!(
+                result.receipts.first().unwrap().status(),
+                "watcher must not change decryption mid-block"
+            );
+        }
+    }
+
+    #[test]
+    fn transactions_fail_before_block_key_initialization() {
+        let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+        let setup = setup_test(&mut state);
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        let envelope = get_tx_envelope(&setup, sample_seismic_tx(&setup, "must not execute"));
+        let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+        assert!(executor
+            .execute_transaction(recovered)
+            .unwrap_err()
+            .to_string()
+            .contains("uninitialized"));
+        let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+        assert!(executor
+            .execute_transaction_with_result_closure(recovered, |_| {})
+            .unwrap_err()
+            .to_string()
+            .contains("uninitialized"));
+    }
+
+    #[test]
     fn test_transaction_decryption_in_executor() {
         let db = InMemoryDB::default();
         let mut state = StateBuilder::new_with_database(db).build();
@@ -540,6 +660,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let tx_seismic = sample_seismic_tx(&setup, plaintext);
@@ -565,6 +686,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let elements = TxSeismicElements {
             encryption_pubkey: setup.encryption_pubkey,
@@ -603,6 +725,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let mut tx_seismic = sample_seismic_tx(&setup, plaintext);
@@ -635,6 +758,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let mut tx_seismic = sample_seismic_tx(&setup, plaintext);
@@ -666,6 +790,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         // First: a bad decryption tx
         let mut bad_tx = sample_seismic_tx(&setup, "bad-decrypt");
@@ -707,6 +832,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let seismic_elements = TxSeismicElements {
@@ -741,6 +867,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let seismic_elements = TxSeismicElements {
@@ -763,6 +890,75 @@ mod tests {
         );
     }
 
+    /// Executing a block at or past a rotation's activation without that epoch's
+    /// keys must be a hard block-execution error (the node stalls until its
+    /// rotation watcher fetches the keys) — never a silent fallback to another
+    /// epoch's keys.
+    #[test]
+    fn test_missing_epoch_keys_stall_block_execution() {
+        let db = rotation_db();
+        let mut state = StateBuilder::new_with_database(db).build();
+        let setup = setup_test(&mut state);
+
+        // Parent-state epoch 1 activates at block 100; its keys are not inserted.
+        // No canonical schedule publication is required for discovery.
+
+        let mut block_env = BlockEnv::default();
+        block_env.number = U256::from(100);
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        let result = executor.apply_pre_execution_changes();
+        assert!(result.unwrap_err().is_retryable(), "missing epoch keys must be retryable");
+        assert_eq!(setup.keyring.requested_epochs(), vec![1]);
+    }
+
+    /// After a rotation activates (with its keys fetched), a transaction still
+    /// encrypted to the *previous* epoch's network key decrypts to garbage and is
+    /// handled as a metered decryption failure — while the same block's executor
+    /// decrypts new-epoch ciphertexts fine.
+    #[test]
+    fn test_old_epoch_ciphertext_fails_after_activation() {
+        let db = rotation_db();
+        let mut state = StateBuilder::new_with_database(db).build();
+        let setup = setup_test(&mut state);
+
+        // Epoch 1 (a fresh, valid keypair) activates at block 100.
+        let rng = &mut rand::thread_rng();
+        let epoch1_sk = SecretKey::new(rng);
+        let epoch1_tx_io = secp256k1::Keypair::from_secret_key(&Secp256k1::new(), &epoch1_sk);
+        setup
+            .keyring
+            .insert_epoch(1, PurposeKeys { tx_io: epoch1_tx_io, rng_ikm: [7u8; 64] })
+            .unwrap();
+
+        let mut block_env = BlockEnv::default();
+        block_env.number = U256::from(100);
+        let evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+        );
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
+
+        // sample_seismic_tx encrypts to the epoch-0 network key: at block 100 the
+        // executor decrypts with epoch 1's key, so this must take the
+        // decryption-failed path (metered, failed receipt), not succeed.
+        let tx_seismic = sample_seismic_tx(&setup, "encrypted to the old epoch");
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+        executor.execute_transaction(recovered).expect("old-epoch tx is metered, not fatal");
+
+        let (_, block_result) = executor.finish().expect("finish should succeed");
+        assert_eq!(block_result.receipts.len(), 1);
+        assert!(
+            !block_result.receipts[0].status(),
+            "old-epoch ciphertext must produce a failed (decryption_failed) receipt"
+        );
+    }
+
     #[test]
     fn test_invalid_recent_block_hash_rejected() {
         let db = InMemoryDB::default();
@@ -775,6 +971,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let seismic_elements = TxSeismicElements {
@@ -809,6 +1006,7 @@ mod tests {
             EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
 
         let plaintext = "hello world";
         let seismic_elements = TxSeismicElements {

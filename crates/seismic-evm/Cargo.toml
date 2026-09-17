@@ -33,6 +33,7 @@ seismic-alloy-consensus = { workspace = true, features = ["std", "serde"] }
 seismic-crypto.workspace = true
 
 # misc
+thiserror.workspace = true
 auto_impl.workspace = true
 secp256k1.workspace = true
 
@@ -48,4 +49,5 @@ std = [
 	"alloy-evm/std",
 	"seismic-revm/std",
 	"secp256k1/std",
+	"thiserror/std",
 ]
