@@ -335,6 +335,21 @@ impl FromRecoveredTx<TxSeismic> for TxEnv {
             data: tx.input.clone(),
             nonce: tx.nonce,
             chain_id: Some(tx.chain_id),
+            authorization_list: tx
+                .authorization_list
+                .iter()
+                .map(|auth| {
+                    Either::Right(RecoveredAuthorization::new_unchecked(
+                        auth.inner().clone(),
+                        auth.signature()
+                            .ok()
+                            .and_then(|signature| {
+                                secp256k1::recover_signer(&signature, auth.signature_hash()).ok()
+                            })
+                            .map_or(RecoveredAuthority::Invalid, RecoveredAuthority::Valid),
+                    ))
+                })
+                .collect(),
             ..Default::default()
         }
     }
@@ -603,6 +618,41 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7702::Authorization;
+    use alloy_primitives::{B256, U256};
+
+    #[test]
+    fn recovered_seismic_transaction_preserves_authorization_list() {
+        let authorization = Authorization {
+            chain_id: U256::from(5123),
+            address: Address::with_last_byte(2),
+            nonce: 7,
+        };
+        let signature =
+            secp256k1::sign_message(B256::repeat_byte(1), authorization.signature_hash())
+                .expect("sign authorization");
+        let signed_authorization = authorization.into_signed(signature);
+        let sender = signed_authorization.recover_authority().expect("recover authority");
+        let tx = TxSeismic {
+            chain_id: 5123,
+            gas_limit: 100_000,
+            to: TxKind::Call(Address::with_last_byte(3)),
+            authorization_list: vec![signed_authorization.clone()],
+            ..Default::default()
+        };
+
+        let tx_env = TxEnv::from_recovered_tx(&tx, sender);
+
+        assert_eq!(tx_env.authorization_list.len(), 1);
+        let authorizations: Vec<_> = tx_env
+            .authorization_list
+            .into_iter()
+            .map(|authorization| {
+                authorization.either(|signed| signed.into_recovered(), |auth| auth)
+            })
+            .collect();
+        assert_eq!(authorizations, vec![signed_authorization.into_recovered()]);
+    }
 
     struct MyTxEnv;
     struct MyTransaction;
