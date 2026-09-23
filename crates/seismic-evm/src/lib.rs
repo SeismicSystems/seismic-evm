@@ -30,12 +30,19 @@ use seismic_revm::{
 
 pub mod block;
 pub mod hardfork;
+pub mod keyring;
+pub mod registry;
 
+pub use keyring::{
+    BlockKeySelection, CanonicalRotationView, EpochKeyConflict, InsertEpochError, MissingEpochKeys,
+    PurposeKeyring, RotationEntry, RotationSchedule, ScheduleError,
+};
 pub use secp256k1;
 
-/// The per-purpose keys a node boots with. The node assembles this from its key
+/// The purpose keys of one key epoch. The node assembles these from its key
 /// custodian (TEE networks) or from the well-known keys (networks with no root
-/// key) and threads it by reference into the EVM factories.
+/// key) and threads them into the EVM factories through an epoch-keyed
+/// [`PurposeKeyring`].
 #[derive(Clone)]
 pub struct PurposeKeys {
     /// The network's tx-io keypair: wallets ECDH against the public half to
@@ -86,9 +93,60 @@ pub struct SeismicEvm<DB: Database, I, P = SeismicPrecompiles<SeismicContext<DB>
         P,
     >,
     inspect: bool,
+    keyring: std::sync::Arc<PurposeKeyring>,
+    selection: Option<Result<BlockKeySelection, KeySelectionError>>,
+}
+
+/// Failure to select this execution attempt's keys from its parent state.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum KeySelectionError {
+    /// No selection has been initialized for this execution attempt.
+    #[error("purpose-key selection is uninitialized")]
+    Uninitialized,
+    /// The authoritative registry could not be read or decoded.
+    #[error("could not read parent-state rotation registry: {0}")]
+    Registry(String),
+    /// Local key material has not been fetched yet.
+    #[error(transparent)]
+    Missing(#[from] MissingEpochKeys),
+}
+
+impl KeySelectionError {
+    /// Missing local material is retryable, never a block-validity error.
+    pub fn into_block_error(self) -> alloy_evm::block::BlockExecutionError {
+        match self {
+            Self::Missing(err) => alloy_evm::block::BlockExecutionError::retryable(err),
+            err => alloy_evm::block::BlockExecutionError::other(err),
+        }
+    }
 }
 
 impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
+    /// Resolve the epoch once from this attempt's database, before any state
+    /// changes. Both successful selections and failures are frozen for this EVM.
+    /// Raw RPC EVMs use the same path as block execution, without fallback keys.
+    pub fn initialize_keys(&mut self) -> Result<&BlockKeySelection, KeySelectionError> {
+        if self.selection.is_none() {
+            let number = self.inner.0.ctx.block.number.saturating_to();
+            let selection = registry::read_schedule(&mut self.inner.0.ctx.journaled_state.database)
+                .map_err(KeySelectionError::Registry)
+                .and_then(|schedule| {
+                    self.keyring
+                        .select_epoch(schedule.epoch_at_block(number), number)
+                        .map_err(KeySelectionError::Missing)
+                });
+            if let Ok(selected) = &selection {
+                self.inner.0.ctx.chain.set_rng_key(selected.keys.rng_ikm);
+            }
+            self.selection = Some(selection);
+        }
+        match &self.selection {
+            Some(Ok(selected)) => Ok(selected),
+            Some(Err(err)) => Err(err.clone()),
+            None => Err(KeySelectionError::Uninitialized),
+        }
+    }
+
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &SeismicContext<DB> {
         &self.inner.0.ctx
@@ -120,8 +178,9 @@ impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
             P,
         >,
         inspect: bool,
+        keyring: std::sync::Arc<PurposeKeyring>,
     ) -> Self {
-        Self { inner, inspect }
+        Self { inner, inspect, keyring, selection: None }
     }
 }
 
@@ -167,6 +226,7 @@ where
         &mut self,
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        self.initialize_keys().map_err(|err| EVMError::Custom(err.to_string()))?;
         if self.inspect {
             self.inner.inspect_tx(tx)
         } else {
@@ -298,27 +358,29 @@ where
 }
 
 /// Factory producing [`SeismicEvm`]s.
+///
+/// Key selection is lazy and fallible: the block executor initializes it before
+/// pre-execution changes, and raw RPC EVMs initialize before their first transaction.
+/// Neither path uses canonical metadata or substitutes keys from another epoch.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-// Factory that creates SeismicEVMs with pre-fetched purpose keys.
-// The purpose keys are provided at boot time and stored globally.
 pub struct SeismicEvmFactory {
-    purpose_keys: &'static PurposeKeys,
+    keyring: std::sync::Arc<PurposeKeyring>,
 }
 
 impl SeismicEvmFactory {
-    /// Creates a new [`SeismicEvmFactory`] with pre-fetched purpose keys.
-    pub fn new_with_purpose_keys(purpose_keys: &'static PurposeKeys) -> Self {
-        Self { purpose_keys }
+    /// Creates a new [`SeismicEvmFactory`] reading the given keyring.
+    pub fn new(keyring: std::sync::Arc<PurposeKeyring>) -> Self {
+        Self { keyring }
     }
 
-    /// Create an EVM using the stored RNG keypair.
+    /// Create an EVM using the keyring's RNG ikm for the block in `input`.
     pub fn create_evm_with_rng_key<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
     ) -> SeismicEvm<DB, NoOpInspector> {
-        let context = self.create_context_with_rng_key();
+        let context = self.uninitialized_context();
 
         SeismicEvm {
             inner: context
@@ -327,22 +389,26 @@ impl SeismicEvmFactory {
                 .with_cfg(input.cfg_env)
                 .build_seismic_evm_with_inspector(NoOpInspector {}),
             inspect: false,
+            keyring: self.keyring.clone(),
+            selection: None,
         }
     }
 
-    /// Create SeismicContext with the RNG key from purpose keys
-    fn create_context_with_rng_key(&self) -> SeismicContext<EmptyDB> {
-        SeismicContext::seismic_with_rng_key(self.purpose_keys.rng_ikm)
+    // This placeholder is never used by transaction execution: initialize_keys
+    // must succeed first, replacing it with the parent-state-selected key.
+    fn uninitialized_context(&self) -> SeismicContext<EmptyDB> {
+        SeismicContext::seismic_with_rng_key([0; 64])
     }
 
-    /// Create an EVM with inspector using the stored RNG keypair.
+    /// Create an EVM with inspector using the keyring's RNG ikm for the block in
+    /// `input`.
     pub fn create_evm_with_inspector_and_rng_key<DB: Database, I: Inspector<SeismicContext<DB>>>(
         &self,
         db: DB,
         input: EvmEnv<SeismicSpecId>,
         inspector: I,
     ) -> SeismicEvm<DB, I> {
-        let context = self.create_context_with_rng_key();
+        let context = self.uninitialized_context();
 
         SeismicEvm {
             inner: context
@@ -351,6 +417,8 @@ impl SeismicEvmFactory {
                 .with_cfg(input.cfg_env)
                 .build_seismic_evm_with_inspector(inspector),
             inspect: true,
+            keyring: self.keyring.clone(),
+            selection: None,
         }
     }
 }
