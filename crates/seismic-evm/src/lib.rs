@@ -34,8 +34,8 @@ pub mod keyring;
 pub mod registry;
 
 pub use keyring::{
-    BlockKeySelection, CanonicalRotationView, EpochKeyConflict, MissingEpochKeys, PurposeKeyring,
-    RotationEntry, RotationSchedule, ScheduleError,
+    BlockKeySelection, CanonicalRotationView, EpochKeyConflict, InsertEpochError, MissingEpochKeys,
+    PurposeKeyring, RotationEntry, RotationSchedule, ScheduleError,
 };
 pub use secp256k1;
 

@@ -145,6 +145,17 @@ impl fmt::Display for EpochKeyConflict {
 
 impl core::error::Error for EpochKeyConflict {}
 
+/// Failure to insert purpose-key material into a keyring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InsertEpochError {
+    /// Simulation handles may read shared material but cannot insert it.
+    #[error("simulation keyrings cannot insert purpose keys")]
+    Simulation,
+    /// The epoch already holds different key material.
+    #[error(transparent)]
+    Conflict(#[from] EpochKeyConflict),
+}
+
 /// The append-only rotation history: entry `i` is epoch `i + 1`, activations strictly
 /// increase, and every entry activates after its announcement. Carries no key
 /// material.
@@ -270,6 +281,13 @@ pub struct BlockKeySelection {
     pub keys: PurposeKeys,
 }
 
+/// Whether a handle may mutate shared key material and enqueue fetch requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyringMode {
+    Live,
+    Simulation,
+}
+
 /// Shared, swappable purpose-key state: the rotation schedule and the key material
 /// for every known epoch. Cheap to clone behind an `Arc`; all methods take `&self`.
 ///
@@ -278,7 +296,7 @@ pub struct BlockKeySelection {
 pub struct PurposeKeyring {
     inner: Arc<RwLock<KeyringState>>,
     canonical: RwLock<CanonicalRotationView>,
-    request_fetches: bool,
+    mode: KeyringMode,
 }
 
 impl fmt::Debug for PurposeKeyring {
@@ -286,6 +304,7 @@ impl fmt::Debug for PurposeKeyring {
         let state = self.read();
         // Deliberately omits the key material.
         f.debug_struct("PurposeKeyring")
+            .field("mode", &self.mode)
             .field("canonical", &self.canonical_view())
             .field("epochs_with_keys", &state.keys.keys().collect::<Vec<_>>())
             .finish()
@@ -302,21 +321,21 @@ impl PurposeKeyring {
                 requested: BTreeSet::new(),
             })),
             canonical: RwLock::new(CanonicalRotationView::default()),
-            request_fetches: true,
+            mode: KeyringMode::Live,
         }
     }
 
     /// Creates a simulation handle sharing only additive key material.
     ///
-    /// It inherits no canonical schedule and cannot enqueue fetch requests. Each
-    /// simulated block resolves its schedule from its own parent overlay. Material
-    /// fetched by the live worker can become available, but can never change an
+    /// It inherits no canonical schedule and cannot insert material or enqueue fetch
+    /// requests. Each simulated block resolves its schedule from its own parent overlay.
+    /// Material fetched by the live worker can become available, but can never change an
     /// already-initialized execution attempt's epoch or keys.
     pub fn snapshot(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             canonical: RwLock::new(CanonicalRotationView::default()),
-            request_fetches: false,
+            mode: KeyringMode::Simulation,
         }
     }
 
@@ -360,12 +379,16 @@ impl PurposeKeyring {
 
     /// Inserts key material for an epoch. Idempotent: re-inserting identical keys
     /// returns `Ok(false)`; inserting *different* keys for a known epoch is a bug
-    /// and errors without overwriting.
-    pub fn insert_epoch(&self, epoch: u64, keys: PurposeKeys) -> Result<bool, EpochKeyConflict> {
+    /// and errors without overwriting. Simulation handles reject all insertions,
+    /// including identical material, without modifying shared keys or fetch requests.
+    pub fn insert_epoch(&self, epoch: u64, keys: PurposeKeys) -> Result<bool, InsertEpochError> {
+        if self.mode == KeyringMode::Simulation {
+            return Err(InsertEpochError::Simulation);
+        }
         let mut state = self.write();
         match state.keys.get(&epoch) {
             Some(existing) if keys_equal(existing, &keys) => Ok(false),
-            Some(_) => Err(EpochKeyConflict { epoch }),
+            Some(_) => Err(EpochKeyConflict { epoch }.into()),
             None => {
                 state.keys.insert(epoch, keys);
                 state.requested.remove(&epoch);
@@ -421,7 +444,7 @@ impl PurposeKeyring {
         if let Some(keys) = state.keys.get(&epoch) {
             return Ok(BlockKeySelection { epoch, keys: keys.clone() });
         }
-        if self.request_fetches {
+        if self.mode == KeyringMode::Live {
             state.requested.insert(epoch);
         }
         Err(MissingEpochKeys { epoch, block })
@@ -489,6 +512,27 @@ mod tests {
         live.insert_epoch(2, test_keys(3)).unwrap();
         assert_eq!(snapshot.select_epoch(2, 200).unwrap().keys.rng_ikm, [3; 64]);
         assert_eq!(snapshot.canonical_view(), CanonicalRotationView::default());
+    }
+
+    #[test]
+    fn simulation_cannot_insert_material_or_clear_live_fetch_requests() {
+        let live = PurposeKeyring::single_epoch(test_keys(1));
+        assert!(live.select_epoch(1, 100).is_err());
+
+        // Taking another snapshot must not restore live permissions.
+        for simulation in [live.snapshot(), live.snapshot().snapshot()] {
+            for (epoch, keys) in [(0, test_keys(1)), (0, test_keys(2)), (1, test_keys(2))] {
+                assert_eq!(simulation.insert_epoch(epoch, keys), Err(InsertEpochError::Simulation));
+            }
+            assert!(keys_equal(&live.keys_for_epoch(0).unwrap(), &test_keys(1)));
+            assert!(live.keys_for_epoch(1).is_none());
+            assert_eq!(live.requested_epochs(), vec![1]);
+        }
+
+        let simulation = live.snapshot();
+        live.insert_epoch(1, test_keys(2)).unwrap();
+        assert!(live.requested_epochs().is_empty());
+        assert!(keys_equal(&simulation.select_epoch(1, 100).unwrap().keys, &test_keys(2)));
     }
 
     fn view(head_number: u64) -> CanonicalRotationView {
@@ -620,7 +664,10 @@ mod tests {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
         assert!(keyring.insert_epoch(1, test_keys(2)).unwrap());
         assert!(!keyring.insert_epoch(1, test_keys(2)).unwrap());
-        assert_eq!(keyring.insert_epoch(1, test_keys(3)), Err(EpochKeyConflict { epoch: 1 }));
+        assert_eq!(
+            keyring.insert_epoch(1, test_keys(3)),
+            Err(InsertEpochError::Conflict(EpochKeyConflict { epoch: 1 }))
+        );
         assert_eq!(keyring.keys_for_epoch(1).unwrap().rng_ikm, [2; 64]);
     }
 
