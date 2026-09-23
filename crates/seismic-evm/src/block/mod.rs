@@ -1036,8 +1036,8 @@ mod tests {
     fn test_txtype_precompile_via_factory() {
         fn probe(tx_type: u8, signed_read: bool, selector: &[u8]) -> U256 {
             let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
-            let mock_keys = Box::leak(Box::new(PurposeKeys::well_known()));
-            let evm_factory = SeismicEvmFactory::new_with_purpose_keys(mock_keys);
+            let keyring = Arc::new(PurposeKeyring::single_epoch(PurposeKeys::well_known()));
+            let evm_factory = SeismicEvmFactory::new(keyring);
             let mut evm = evm_factory.create_evm(
                 &mut state,
                 EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
