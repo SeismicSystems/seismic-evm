@@ -152,16 +152,29 @@ where
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "block hash lookup for block {number} failed while validating transaction {tx_hash}: {source}"
+)]
+struct BlockHashLookupError<E> {
+    number: u64,
+    tx_hash: B256,
+    #[source]
+    source: E,
+}
+
 #[derive(Debug)]
 enum FreshnessCheckError<E> {
     Validation(SeismicValidationError),
-    Database(E),
+    Database { number: u64, source: E },
 }
 
 impl<E: core::error::Error + Send + Sync + 'static> FreshnessCheckError<E> {
     fn into_block_error(self, hash: B256) -> BlockExecutionError {
         match self {
-            Self::Database(error) => BlockExecutionError::other(error),
+            Self::Database { number, source } => {
+                BlockExecutionError::other(BlockHashLookupError { number, tx_hash: hash, source })
+            }
             Self::Validation(error) => {
                 BlockValidationError::InvalidTx { hash, error: Box::new(error) }.into()
             }
@@ -198,7 +211,9 @@ fn validate_tx_decryption_elements<
     // Walk backwards through the lookback window
     let oldest = current_block.saturating_sub(SEISMIC_TX_RECENT_BLOCK_LOOKBACK);
     for n in (oldest..current_block.saturating_sub(1)).rev() {
-        let hash = block_hash_reader.block_hash(n).map_err(FreshnessCheckError::Database)?;
+        let hash = block_hash_reader
+            .block_hash(n)
+            .map_err(|source| FreshnessCheckError::Database { number: n, source })?;
         if hash == elements.recent_block_hash {
             return Ok(());
         }
@@ -703,9 +718,23 @@ mod tests {
             "a local DB failure must not invalidate the transaction: {error:?}; pending: {:?}",
             executor.evm().ctx().error,
         );
-        assert!(error
-            .to_string()
-            .contains("injected freshness block-hash database error at block 98"));
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "block hash lookup for block 98 failed while validating transaction {}: \
+                 injected freshness block-hash database error at block 98",
+                envelope.trie_hash(),
+            ),
+        );
+        let BlockExecutionError::Internal(internal) = &error else {
+            unreachable!("the error classification was checked above");
+        };
+        let lookup = internal.downcast_other::<BlockHashLookupError<FreshnessDbError>>().unwrap();
+        assert_eq!(lookup.number, 98);
+        assert_eq!(lookup.tx_hash, envelope.trie_hash());
+        let source =
+            core::error::Error::source(lookup).expect("the provider error must be preserved");
+        assert_eq!(source.downcast_ref::<FreshnessDbError>().unwrap().0, 98);
         assert!(executor.evm().ctx().error.is_ok(), "the DB error must not remain pending");
         assert_eq!(
             executor.evm().ctx().journaled_state.database.database.block_hash_reads,
