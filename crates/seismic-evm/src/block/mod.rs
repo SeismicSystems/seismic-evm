@@ -84,8 +84,9 @@ type SeismicBlockExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
 /// Block executor for Seismic.
 /// Wraps a [`EthBlockExecutor`] and decrypts the transaction input before executing
 ///
-/// Note that only execute endpoints (e.g. eth_sendRawTransaction) will route through
-/// the block executor, not simulate endpoints (e.g. eth_call, eth_estimateGas).
+/// Ordinary block executors validate freshness and decrypt encrypted transactions.
+/// Request-local RPC simulation factories may opt in to already-authenticated plaintext
+/// signed reads; that mode must never be enabled for payload building or received blocks.
 #[derive(Debug)]
 pub struct SeismicBlockExecutor<'a, Evm, Spec, R>
 where
@@ -95,6 +96,8 @@ where
     inner: EthBlockExecutor<'a, Evm, Spec, R>,
     /// Owned selection; never re-read shared metadata while executing transactions.
     selected: Option<BlockKeySelection>,
+    /// Only request-local RPC factories enable already-authenticated plaintext signed reads.
+    plaintext_signed_reads: bool,
 }
 
 impl<'a, E, Spec, R> SeismicBlockExecutor<'a, E, Spec, R>
@@ -108,7 +111,11 @@ where
     where
         Spec: Clone,
     {
-        Self { inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder), selected: None }
+        Self {
+            inner: EthBlockExecutor::new(evm, ctx, spec, receipt_builder),
+            selected: None,
+            plaintext_signed_reads: false,
+        }
     }
 
     fn selected_keys(&self) -> Result<&BlockKeySelection, BlockExecutionError> {
@@ -122,7 +129,7 @@ where
 ///
 /// When converted to `SeismicTransaction<TxEnv>` via [`ToTxEnv`], the resulting
 /// transaction has `decryption_failed = true`, causing the handler to skip bytecode
-/// execution and charge only intrinsic gas.
+/// execution. Fee settlement still applies intrinsic gas and the applicable calldata gas floor.
 struct DecryptionFailed<T>(T);
 
 impl<T> ToTxEnv<SeismicTransaction<TxEnv>> for DecryptionFailed<T>
@@ -266,24 +273,34 @@ where
 
         let tx_hash = receipt_tx.trie_hash();
 
-        // Stale or expired transactions are invalid; DB failures are internal errors.
-        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
-            .map_err(|error| error.into_block_error(tx_hash))?;
+        let result = if self.plaintext_signed_reads && tx.to_tx_env().signed_read {
+            // The RPC ingress already authenticates, validates tip freshness, and decrypts
+            // these call-only requests. Simulated block heights do not revalidate their
+            // expiry and plaintext must not be decrypted a second time. This mode is
+            // opt-in on a request-local factory, never inferred solely from a wire flag.
+            self.inner.execute_transaction_with_commit_condition(tx, f)?
+        } else {
+            // Stale or expired transactions are invalid; DB failures are internal errors.
+            validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
+                .map_err(|error| error.into_block_error(tx_hash))?;
 
-        let signer = RecoveredTx::signer(&tx);
-        let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
-            Ok(plaintext_base) => {
-                let recovered = Recovered::new_unchecked(plaintext_base, *signer);
-                self.inner.execute_transaction_with_commit_condition(&recovered, f)?
-            }
-            Err(_) => {
-                // Decryption failed: wrap in DecryptionFailed so the handler
-                // skips bytecode execution and charges intrinsic gas (including
-                // calldata cost). revm handles all gas accounting (sender debit,
-                // coinbase credit, gas refund) natively.
-                let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
-                self.inner
-                    .execute_transaction_with_commit_condition(DecryptionFailed(&recovered), f)?
+            let signer = RecoveredTx::signer(&tx);
+            match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
+                Ok(plaintext_base) => {
+                    let recovered = Recovered::new_unchecked(plaintext_base, *signer);
+                    self.inner.execute_transaction_with_commit_condition(&recovered, f)?
+                }
+                Err(_) => {
+                    // Decryption failed: wrap in DecryptionFailed so the handler
+                    // skips bytecode execution and charges intrinsic gas (including
+                    // calldata cost). revm handles all gas accounting (sender debit,
+                    // coinbase credit, gas refund) natively.
+                    let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
+                    self.inner.execute_transaction_with_commit_condition(
+                        DecryptionFailed(&recovered),
+                        f,
+                    )?
+                }
             }
         };
 
@@ -299,33 +316,13 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let tx_io_sk = self.selected_keys()?.keys.tx_io.secret_key();
-        let receipt_tx: &<R as ReceiptBuilder>::Transaction = RecoveredTx::tx(&tx);
-        let current_block: u64 = self.evm().block().number.saturating_to();
-        let parent_hash = self.inner.ctx.parent_hash;
-
-        let tx_hash = receipt_tx.trie_hash();
-
-        // Stale or expired transactions are invalid; DB failures are internal errors.
-        validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
-            .map_err(|error| error.into_block_error(tx_hash))?;
-
-        let signer = RecoveredTx::signer(&tx);
-        let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
-            Ok(plaintext_base) => {
-                let recovered = Recovered::new_unchecked(plaintext_base, *signer);
-                self.inner.execute_transaction_with_result_closure(&recovered, f)?
-            }
-            Err(_) => {
-                let recovered = Recovered::new_unchecked(receipt_tx.clone(), *signer);
-                self.inner
-                    .execute_transaction_with_result_closure(DecryptionFailed(&recovered), f)?
-            }
-        };
-
-        // Always advance accumulator (this path always commits).
-        self.evm_mut().seismic_chain_mut().advance_tx_accumulator(&tx_hash);
-        Ok(result)
+        // Keep decryption, simulation handling, and accumulator updates identical
+        // across both entry points. The result-closure path always commits.
+        self.execute_transaction_with_commit_condition(tx, |result| {
+            f(result);
+            CommitChanges::Yes
+        })?
+        .ok_or_else(|| BlockExecutionError::msg("committed transaction produced no gas result"))
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -361,18 +358,31 @@ pub struct SeismicBlockExecutorFactory<
     evm_factory: EvmFactory,
     /// Epoch-keyed purpose keys; executors select their block's epoch through it.
     pub keyring: Arc<PurposeKeyring>,
+    /// Opt-in only for request-local simulations of authenticated plaintext signed reads.
+    plaintext_signed_reads: bool,
 }
 
 impl<R, Spec, EvmFactory> SeismicBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new [`SeismicBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
-    /// [`SeismicReceiptBuilder`].
+    /// [`ReceiptBuilder`].
     pub fn new(
         receipt_builder: R,
         spec: Spec,
         evm_factory: EvmFactory,
         keyring: Arc<PurposeKeyring>,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory, keyring }
+        Self { receipt_builder, spec, evm_factory, keyring, plaintext_signed_reads: false }
+    }
+
+    /// Permit already-authenticated and decrypted signed reads in an RPC simulation.
+    ///
+    /// Enable only on a request-local factory whose ingress enforces signature,
+    /// signed-read intent, freshness, and decryption. Ordinary encrypted transactions
+    /// (including replay) still use the live decryption and validation path. Never
+    /// enable this on the factory used for payload building or received blocks.
+    pub const fn with_plaintext_signed_reads(mut self) -> Self {
+        self.plaintext_signed_reads = true;
+        self
     }
 
     /// Exposes the receipt builder.
@@ -419,7 +429,9 @@ where
         DB: Database + 'a,
         I: Inspector<<SeismicEvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
-        SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
+        let mut executor = SeismicBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder);
+        executor.plaintext_signed_reads = self.plaintext_signed_reads;
+        executor
     }
 }
 
@@ -471,6 +483,235 @@ mod tests {
         )
         .unwrap();
         db
+    }
+
+    #[test]
+    fn decryption_failure_changes_only_execution_value_and_failure_flag() {
+        use seismic_alloy_consensus::GasPayment;
+        for gas_payment in
+            [GasPayment::Auto, GasPayment::Native, GasPayment::Token(Address::repeat_byte(0x77))]
+        {
+            let original = TxSeismic { value: U256::from(123), gas_payment, ..Default::default() };
+            let signed =
+                original.clone().into_signed(Signature::new(U256::from(1), U256::from(2), false));
+            let envelope = SeismicTxEnvelope::from(signed);
+            let hash = *envelope.tx_hash();
+            let wrapper =
+                DecryptionFailed(Recovered::new_unchecked(envelope, Address::repeat_byte(0x11)));
+            let env = wrapper.to_tx_env();
+            let mut expected: SeismicTransaction<TxEnv> = wrapper.0.to_tx_env();
+            expected.decryption_failed = true;
+            expected.base.value = U256::ZERO;
+            assert_eq!(env, expected, "only execution value and the failure flag may change");
+            assert!(env.decryption_failed);
+            assert_eq!(env.base.value, U256::ZERO);
+            assert_eq!(env.gas_payment, alloy_evm::tx::gas_payment_to_env(gas_payment));
+            assert_eq!(env.tx_hash, hash);
+            assert_eq!(*wrapper.0.inner().tx_hash(), hash);
+            let SeismicTxEnvelope::Seismic(tx) = wrapper.0.inner() else {
+                panic!("expected seismic transaction")
+            };
+            assert_eq!(
+                tx.tx(),
+                &original,
+                "signed value, selector, and all metadata remain unchanged"
+            );
+        }
+    }
+
+    fn first_tx_accumulator(hash: B256) -> B256 {
+        keccak256([B256::ZERO.as_slice(), hash.as_slice()].concat())
+    }
+
+    #[test]
+    fn plaintext_signed_reads_require_request_local_opt_in() {
+        for enabled in [false, true] {
+            for use_result_closure in [false, true] {
+                for inspected in [false, true] {
+                    let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+                    let setup = setup_test(&mut state);
+                    let mut cfg = CfgEnv::new_with_spec(SeismicSpecId::MERCURY);
+                    cfg.chain_id = 5124;
+                    let mut evm = setup.evm_factory.create_evm(
+                        &mut state,
+                        EvmEnv::new(
+                            cfg,
+                            BlockEnv { number: U256::from(100), ..Default::default() },
+                        ),
+                    );
+                    evm.set_inspector_enabled(inspected);
+                    let factory = if enabled {
+                        setup.executor_factory.clone().with_plaintext_signed_reads()
+                    } else {
+                        setup.executor_factory.clone()
+                    };
+                    let mut executor = factory.create_executor(evm, setup.ctx.clone());
+                    executor.apply_pre_execution_changes().unwrap();
+                    // Trusted RPC ingress authenticated/decrypted at an earlier tip. A future
+                    // simulated height must not recheck expiry or decrypt this input again.
+                    let mut tx = sample_seismic_tx(&setup, "authenticated plaintext");
+                    tx.seismic_elements.signed_read = true;
+                    tx.seismic_elements.expires_at_block = 50;
+                    // Re-encrypt after changing AEAD metadata, as real ingress would receive it.
+                    let tx = sample_seismic_tx_with_elements(
+                        &setup,
+                        "authenticated plaintext",
+                        tx.seismic_elements,
+                    );
+                    let encrypted = get_tx_envelope(&setup, tx);
+                    let plaintext = encrypted
+                        .plaintext_copy(&setup.purpose_keys.tx_io.secret_key(), setup.signer)
+                        .unwrap();
+                    let recovered = Recovered::new_unchecked(&plaintext, setup.signer);
+                    let mut successful = false;
+                    let result = if use_result_closure {
+                        executor
+                            .execute_transaction_with_result_closure(recovered, |result| {
+                                successful = result.is_success();
+                            })
+                            .map(Some)
+                    } else {
+                        executor.execute_transaction_with_commit_condition(recovered, |result| {
+                            successful = result.is_success();
+                            CommitChanges::Yes
+                        })
+                    };
+                    if enabled {
+                        assert!(result.is_ok(), "trusted plaintext should execute: {result:?}");
+                        assert!(successful, "plaintext must not be decrypted a second time");
+                        let expected = first_tx_accumulator(plaintext.trie_hash());
+                        assert_eq!(
+                            executor.evm_mut().seismic_chain_mut().tx_hash_accumulator(),
+                            &expected
+                        );
+                        let (_, block) = executor.finish().unwrap();
+                        assert_eq!(block.receipts.len(), 1);
+                        assert!(block.receipts[0].status());
+                    } else {
+                        assert!(matches!(result, Err(BlockExecutionError::Validation(_))));
+                        assert!(!successful, "wire intent alone must not enable the bypass");
+                        assert_eq!(
+                            executor.evm_mut().seismic_chain_mut().tx_hash_accumulator(),
+                            &B256::ZERO
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn simulation_factory_preserves_live_encrypted_validation_and_decryption() {
+        for use_result_closure in [false, true] {
+            for inspected in [false, true] {
+                for (expired, corrupted) in [(false, false), (true, false), (false, true)] {
+                    let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+                    let setup = setup_test(&mut state);
+                    let mut cfg = CfgEnv::new_with_spec(SeismicSpecId::MERCURY);
+                    cfg.chain_id = 5124;
+                    let mut evm = setup.evm_factory.create_evm(
+                        &mut state,
+                        EvmEnv::new(
+                            cfg,
+                            BlockEnv { number: U256::from(100), ..Default::default() },
+                        ),
+                    );
+                    evm.set_inspector_enabled(inspected);
+                    let factory = setup.executor_factory.clone().with_plaintext_signed_reads();
+                    let mut executor = factory.create_executor(evm, setup.ctx.clone());
+                    executor.apply_pre_execution_changes().unwrap();
+                    let mut tx = sample_seismic_tx(&setup, "ordinary encrypted replay");
+                    if expired {
+                        tx.seismic_elements.expires_at_block = 50;
+                    }
+                    if corrupted {
+                        tx.input = Bytes::from_static(b"invalid ciphertext");
+                    }
+                    let envelope = get_tx_envelope(&setup, tx);
+                    let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+                    let mut successful = None;
+                    let result = if use_result_closure {
+                        executor
+                            .execute_transaction_with_result_closure(recovered, |result| {
+                                successful = Some(result.is_success());
+                            })
+                            .map(Some)
+                    } else {
+                        executor.execute_transaction_with_commit_condition(recovered, |result| {
+                            successful = Some(result.is_success());
+                            CommitChanges::Yes
+                        })
+                    };
+                    if expired {
+                        assert!(matches!(result, Err(BlockExecutionError::Validation(_))));
+                        assert_eq!(successful, None);
+                        assert_eq!(
+                            executor.evm_mut().seismic_chain_mut().tx_hash_accumulator(),
+                            &B256::ZERO
+                        );
+                    } else {
+                        assert!(result.is_ok(), "encrypted replay should be processed: {result:?}");
+                        assert_eq!(successful, Some(!corrupted));
+                        assert_eq!(
+                            executor.evm_mut().seismic_chain_mut().tx_hash_accumulator(),
+                            &first_tx_accumulator(envelope.trie_hash())
+                        );
+                        let (_, block) = executor.finish().unwrap();
+                        assert_eq!(block.receipts.len(), 1);
+                        assert_eq!(block.receipts[0].status(), !corrupted);
+                        assert!(block.gas_used > 21_000);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn uncommitted_plaintext_signed_read_does_not_advance_accumulator_or_nonce() {
+        for inspected in [false, true] {
+            let mut state = StateBuilder::new_with_database(InMemoryDB::default()).build();
+            let setup = setup_test(&mut state);
+            let mut evm = setup.evm_factory.create_evm(
+                &mut state,
+                EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            );
+            evm.set_inspector_enabled(inspected);
+            let factory = setup.executor_factory.clone().with_plaintext_signed_reads();
+            let mut executor = factory.create_executor(evm, setup.ctx.clone());
+            executor.apply_pre_execution_changes().unwrap();
+            let mut elements = sample_seismic_tx(&setup, "unused").seismic_elements;
+            elements.signed_read = true;
+            let envelope = get_tx_envelope(
+                &setup,
+                sample_seismic_tx_with_elements(&setup, "authenticated plaintext", elements),
+            );
+            let plaintext = envelope
+                .plaintext_copy(&setup.purpose_keys.tx_io.secret_key(), setup.signer)
+                .unwrap();
+            let result = executor
+                .execute_transaction_with_commit_condition(
+                    Recovered::new_unchecked(&plaintext, setup.signer),
+                    |result| {
+                        assert!(result.is_success());
+                        CommitChanges::No
+                    },
+                )
+                .unwrap();
+            assert_eq!(result, None);
+            assert_eq!(executor.evm_mut().seismic_chain_mut().tx_hash_accumulator(), &B256::ZERO);
+            executor
+                .execute_transaction_with_result_closure(
+                    Recovered::new_unchecked(&plaintext, setup.signer),
+                    |result| assert!(result.is_success()),
+                )
+                .expect("the same nonce must remain usable after a non-commit");
+            assert_eq!(
+                executor.evm_mut().seismic_chain_mut().tx_hash_accumulator(),
+                &first_tx_accumulator(plaintext.trie_hash())
+            );
+            let (_, block) = executor.finish().unwrap();
+            assert_eq!(block.receipts.len(), 1);
+        }
     }
 
     fn sign_seismic_tx(tx: &TxSeismic, signing_key: &SigningKey) -> Signature {
@@ -586,6 +827,7 @@ mod tests {
             nonce: tx_metadata.legacy_fields.nonce,
             gas_price: 1000000000,
             gas_limit: 1000000,
+            gas_payment: seismic_alloy_consensus::GasPayment::Auto,
             to: tx_metadata.legacy_fields.to,
             value: tx_metadata.legacy_fields.value,
             input: ciphertext,
@@ -1282,6 +1524,7 @@ mod tests {
                 tx_hash: Default::default(),
                 decryption_failed: false,
                 signed_read,
+                gas_payment: seismic_revm::GasPayment::Auto,
             };
 
             let out = match evm.transact(tx).expect("transact to 0x6A").result {
