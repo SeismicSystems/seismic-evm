@@ -1031,6 +1031,199 @@ mod tests {
         }
     }
 
+    #[derive(Debug, thiserror::Error)]
+    #[error("injected gas-token storage database error for {0}")]
+    struct GasTokenDbError(Address);
+
+    impl DBErrorMarker for GasTokenDbError {}
+
+    /// Registry seeded with one active Public six-decimal token; storage reads of
+    /// `fail_storage_of` fail, every other read succeeds.
+    #[derive(Debug)]
+    struct GasTokenDb {
+        inner: InMemoryDB,
+        fail_storage_of: Option<Address>,
+    }
+
+    impl GasTokenDb {
+        fn new(token: Address, fail_storage_of: Option<Address>) -> Self {
+            use seismic_revm::gas_token_registry::{
+                token_metadata_slot, GAS_TOKEN_REGISTRY, TOKEN_COUNT_SLOT,
+            };
+            let mut inner = InMemoryDB::default();
+            inner.insert_account_info(GAS_TOKEN_REGISTRY, AccountInfo::default());
+            // The token must exist as an account: `State` answers storage reads of accounts
+            // that do not exist with zero without consulting the database at all.
+            inner.insert_account_info(token, AccountInfo { nonce: 1, ..Default::default() });
+            inner
+                .insert_account_storage(GAS_TOKEN_REGISTRY, TOKEN_COUNT_SLOT, U256::from(1).into())
+                .unwrap();
+            // token | active (byte 20) | mode Public = 1 (byte 21) | decimals 6 (byte 22)
+            let metadata = U256::from_be_bytes(token.into_word().0)
+                | (U256::from(1) << 160usize)
+                | (U256::from(1) << 168usize)
+                | (U256::from(6) << 176usize);
+            inner
+                .insert_account_storage(GAS_TOKEN_REGISTRY, token_metadata_slot(0), metadata.into())
+                .unwrap();
+            inner
+                .insert_account_storage(
+                    GAS_TOKEN_REGISTRY,
+                    token_metadata_slot(0).wrapping_add(U256::from(1)),
+                    U256::from(3).into(),
+                )
+                .unwrap();
+            Self { inner, fail_storage_of }
+        }
+    }
+
+    impl RevmDatabase for GasTokenDb {
+        type Error = GasTokenDbError;
+
+        fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.inner.basic(address).unwrap())
+        }
+
+        fn code_by_hash(&mut self, hash: B256) -> Result<Bytecode, Self::Error> {
+            Ok(self.inner.code_by_hash(hash).unwrap())
+        }
+
+        fn storage(
+            &mut self,
+            address: Address,
+            index: U256,
+        ) -> Result<FlaggedStorage, Self::Error> {
+            if self.fail_storage_of == Some(address) {
+                return Err(GasTokenDbError(address));
+            }
+            Ok(self.inner.storage(address, index).unwrap())
+        }
+
+        fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+            Ok(self.inner.block_hash(number).unwrap())
+        }
+    }
+
+    /// Gas-token payment failures must reach the engine with the same classification as any
+    /// other transaction error: successfully read state that cannot pay is deterministic
+    /// invalidity (`Validation`, so the block is `INVALID`), while a failed registry or
+    /// balance read is a local `Internal` error that must never invalidate the block.
+    #[test]
+    fn gas_token_payment_errors_classify_as_invalid_tx_or_internal() {
+        use seismic_alloy_consensus::GasPayment;
+        use seismic_revm::gas_token_registry::GAS_TOKEN_REGISTRY;
+
+        let token = Address::repeat_byte(0x77);
+        let cases: [(&str, GasPayment, Option<Address>, Option<&str>); 4] = [
+            (
+                "unaffordable registered token",
+                GasPayment::Token(token),
+                None,
+                Some("lack of funds"),
+            ),
+            (
+                "unregistered explicit token",
+                GasPayment::Token(Address::repeat_byte(0x78)),
+                None,
+                Some("is not registered"),
+            ),
+            ("registry read failure", GasPayment::Token(token), Some(GAS_TOKEN_REGISTRY), None),
+            ("token balance read failure", GasPayment::Token(token), Some(token), None),
+        ];
+
+        for use_result_closure in [false, true] {
+            for (name, payment, fail_storage_of, deterministic) in cases.iter().copied() {
+                let mut state =
+                    StateBuilder::new_with_database(GasTokenDb::new(token, fail_storage_of))
+                        .build();
+                // The signer holds native funds: explicit token selection must not fall back
+                // to them, and they let the follow-up Auto transaction prove liveness.
+                let setup = setup_test(&mut state);
+                let mut cfg = CfgEnv::new_with_spec(SeismicSpecId::MERCURY);
+                cfg.chain_id = 5124;
+                let evm = setup.evm_factory.create_evm(
+                    &mut state,
+                    EvmEnv::new(cfg, BlockEnv { number: U256::from(100), ..Default::default() }),
+                );
+                let mut executor = SeismicBlockExecutor::new(
+                    evm,
+                    setup.ctx.clone(),
+                    SeismicChainHardforks::seismic_mainnet(),
+                    SeismicAlloyReceiptBuilder::default(),
+                );
+                executor.apply_pre_execution_changes().unwrap();
+
+                let mut tx = sample_seismic_tx(&setup, "token fee");
+                tx.gas_payment = payment;
+                let envelope = get_tx_envelope(&setup, tx);
+                let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+                let result = if use_result_closure {
+                    executor.execute_transaction_with_result_closure(recovered, |_| {}).map(Some)
+                } else {
+                    executor.execute_transaction_with_commit_condition(recovered, |_| {
+                        CommitChanges::Yes
+                    })
+                };
+                let error = result.expect_err(name);
+                match deterministic {
+                    Some(expected) => {
+                        let BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                            hash,
+                            error: inner,
+                        }) = &error
+                        else {
+                            panic!("{name}: expected a validation error, got {error:?}");
+                        };
+                        assert_eq!(*hash, envelope.trie_hash(), "{name}");
+                        assert!(
+                            inner.to_string().contains(expected),
+                            "{name}: expected {expected:?} in {inner}"
+                        );
+                    }
+                    None => {
+                        assert!(
+                            matches!(&error, BlockExecutionError::Internal(_)),
+                            "{name}: a local DB failure must not invalidate the block: {error:?}"
+                        );
+                        assert!(
+                            error.to_string().contains("injected gas-token storage database error"),
+                            "{name}: the provider error must be preserved: {error}"
+                        );
+                    }
+                }
+                assert!(
+                    executor.evm().ctx().error.is_ok(),
+                    "{name}: no error may remain pending for the next transaction"
+                );
+
+                // Native-funded Auto never reads the registry, so it must succeed at the same
+                // nonce even while registry/token reads keep failing: the rejected transaction
+                // neither consumed the nonce nor charged any asset.
+                let retry = sample_seismic_tx(&setup, "native auto");
+                let envelope = get_tx_envelope(&setup, retry);
+                let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+                let mut succeeded = false;
+                let result = if use_result_closure {
+                    executor
+                        .execute_transaction_with_result_closure(recovered, |result| {
+                            succeeded = result.is_success();
+                        })
+                        .map(Some)
+                } else {
+                    executor.execute_transaction_with_commit_condition(recovered, |result| {
+                        succeeded = result.is_success();
+                        CommitChanges::Yes
+                    })
+                };
+                assert!(
+                    result.is_ok(),
+                    "{name}: the next valid tx must not inherit the error: {result:?}"
+                );
+                assert!(succeeded, "{name}: the native Auto transaction must execute");
+            }
+        }
+    }
+
     #[test]
     fn watcher_update_cannot_change_selected_block_keys() {
         for use_result_closure in [false, true] {
