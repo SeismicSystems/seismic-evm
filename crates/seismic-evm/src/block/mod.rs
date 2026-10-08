@@ -30,7 +30,7 @@ use alloy_evm::{
 use alloy_primitives::{B256, U256};
 use revm::{
     context::{result::ExecutionResult, TxEnv},
-    context_interface::{ContextTr, Host},
+    context_interface::ContextTr,
 };
 use seismic_alloy_consensus::{InputDecryptionElements, SeismicValidationError};
 use seismic_revm::{transaction::abstraction::SeismicTransaction, SeismicChain};
@@ -64,13 +64,18 @@ const SEISMIC_TX_RECENT_BLOCK_LOOKBACK: u64 = 100;
 /// Implemented by [`crate::SeismicEvm`] to allow the block executor to
 /// validate `recent_block_hash` against a window of recent blocks.
 pub trait BlockHashReader {
-    /// Returns the block hash for the given block number, or `None` on DB error.
-    fn block_hash(&mut self, number: u64) -> Option<B256>;
+    /// Error returned by the underlying database.
+    type Error: core::error::Error + Send + Sync + 'static;
+
+    /// Returns the block hash for the given block number, propagating DB errors.
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error>;
 }
 
 impl<DB: Database, I, P> BlockHashReader for crate::SeismicEvm<DB, I, P> {
-    fn block_hash(&mut self, number: u64) -> Option<B256> {
-        Host::block_hash(self.ctx_mut(), number)
+    type Error = DB::Error;
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        revm::Database::block_hash(self.ctx_mut().db_mut(), number)
     }
 }
 
@@ -147,24 +152,55 @@ where
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "block hash lookup for block {number} failed while validating transaction {tx_hash}: {source}"
+)]
+struct BlockHashLookupError<E> {
+    number: u64,
+    tx_hash: B256,
+    #[source]
+    source: E,
+}
+
+#[derive(Debug)]
+enum FreshnessCheckError<E> {
+    Validation(SeismicValidationError),
+    Database { number: u64, source: E },
+}
+
+impl<E: core::error::Error + Send + Sync + 'static> FreshnessCheckError<E> {
+    fn into_block_error(self, hash: B256) -> BlockExecutionError {
+        match self {
+            Self::Database { number, source } => {
+                BlockExecutionError::other(BlockHashLookupError { number, tx_hash: hash, source })
+            }
+            Self::Validation(error) => {
+                BlockValidationError::InvalidTx { hash, error: Box::new(error) }.into()
+            }
+        }
+    }
+}
+
 fn validate_tx_decryption_elements<
     R: Transaction + Encodable2718 + InputDecryptionElements + Clone,
+    H: BlockHashReader,
 >(
     tx: &R,
     current_block: u64,
     parent_hash: B256,
-    block_hash_reader: &mut impl BlockHashReader,
-) -> Result<(), SeismicValidationError> {
+    block_hash_reader: &mut H,
+) -> Result<(), FreshnessCheckError<H::Error>> {
     let elements = match tx.get_decryption_elements() {
         Ok(elements) => elements,
         Err(_) => return Ok(()), // No decryption elements; nothing to validate
     };
 
     if current_block > elements.expires_at_block {
-        return Err(SeismicValidationError::TransactionExpired {
+        return Err(FreshnessCheckError::Validation(SeismicValidationError::TransactionExpired {
             current_block,
             expires_at_block: elements.expires_at_block,
-        });
+        }));
     }
 
     // Fast path: check parent hash directly
@@ -175,14 +211,17 @@ fn validate_tx_decryption_elements<
     // Walk backwards through the lookback window
     let oldest = current_block.saturating_sub(SEISMIC_TX_RECENT_BLOCK_LOOKBACK);
     for n in (oldest..current_block.saturating_sub(1)).rev() {
-        if block_hash_reader.block_hash(n) == Some(elements.recent_block_hash) {
+        let hash = block_hash_reader
+            .block_hash(n)
+            .map_err(|source| FreshnessCheckError::Database { number: n, source })?;
+        if hash == elements.recent_block_hash {
             return Ok(());
         }
     }
 
-    Err(SeismicValidationError::InvalidRecentBlockHash {
+    Err(FreshnessCheckError::Validation(SeismicValidationError::InvalidRecentBlockHash {
         provided_hash: elements.recent_block_hash,
-    })
+    }))
 }
 
 impl<'db, DB, E, Spec, R> BlockExecutor for SeismicBlockExecutor<'_, E, Spec, R>
@@ -227,13 +266,9 @@ where
 
         let tx_hash = receipt_tx.trie_hash();
 
-        // Freshness failure is a per-tx validity error (the tx is stale), not a fatal internal
-        // error: surface it as InvalidTx so the builder skips it and block import responds INVALID.
+        // Stale or expired transactions are invalid; DB failures are internal errors.
         validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
-            .map_err(|error| BlockValidationError::InvalidTx {
-                hash: tx_hash,
-                error: Box::new(error),
-            })?;
+            .map_err(|error| error.into_block_error(tx_hash))?;
 
         let signer = RecoveredTx::signer(&tx);
         let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
@@ -271,13 +306,9 @@ where
 
         let tx_hash = receipt_tx.trie_hash();
 
-        // Freshness failure is a per-tx validity error (the tx is stale), not a fatal internal
-        // error: surface it as InvalidTx so the builder skips it and block import responds INVALID.
+        // Stale or expired transactions are invalid; DB failures are internal errors.
         validate_tx_decryption_elements(receipt_tx, current_block, parent_hash, self.evm_mut())
-            .map_err(|error| BlockValidationError::InvalidTx {
-                hash: tx_hash,
-                error: Box::new(error),
-            })?;
+            .map_err(|error| error.into_block_error(tx_hash))?;
 
         let signer = RecoveredTx::signer(&tx);
         let result = match receipt_tx.plaintext_copy(&tx_io_sk, *signer) {
@@ -398,11 +429,17 @@ mod tests {
     use crate::{CanonicalRotationView, PurposeKeys, RotationEntry, RotationSchedule};
     use alloy_consensus::SignableTransaction;
     use alloy_evm::EvmEnv;
-    use alloy_primitives::{aliases::U96, keccak256, Bytes, Signature, TxKind, B256, U256};
+    use alloy_primitives::{
+        aliases::U96, keccak256, Bytes, FlaggedStorage, Signature, TxKind, B256, U256,
+    };
     use k256::ecdsa::{SigningKey, VerifyingKey};
     use revm::{
+        bytecode::Bytecode,
         context::{BlockEnv, CfgEnv},
         database::{InMemoryDB, StateBuilder},
+        database_interface::DBErrorMarker,
+        state::AccountInfo,
+        Database as RevmDatabase,
     };
     use secp256k1::{rand, PublicKey, Secp256k1, SecretKey};
     use seismic_alloy_consensus::{
@@ -473,7 +510,7 @@ mod tests {
         evm_factory: SeismicEvmFactory,
     }
 
-    fn setup_test<'a>(state: &mut State<InMemoryDB>) -> SetupTest<'a> {
+    fn setup_test<'a, DB: Database>(state: &mut State<DB>) -> SetupTest<'a> {
         let rng = &mut rand::thread_rng();
         let signing_key = SigningKey::random(rng);
         let pubkey = signing_key.verifying_key();
@@ -568,6 +605,188 @@ mod tests {
             signed_read: false,
         };
         sample_seismic_tx_with_elements(setup, plaintext, seismic_elements)
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("injected freshness block-hash database error at block {0}")]
+    struct FreshnessDbError(u64);
+
+    impl DBErrorMarker for FreshnessDbError {}
+
+    /// All unrelated reads succeed, so the fault can only originate in the freshness scan.
+    #[derive(Debug, Default)]
+    struct FreshnessDb {
+        inner: InMemoryDB,
+        fail_at: Option<u64>,
+        block_hash_reads: Vec<u64>,
+    }
+
+    impl RevmDatabase for FreshnessDb {
+        type Error = FreshnessDbError;
+
+        fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.inner.basic(address).unwrap())
+        }
+
+        fn code_by_hash(&mut self, hash: B256) -> Result<Bytecode, Self::Error> {
+            Ok(self.inner.code_by_hash(hash).unwrap())
+        }
+
+        fn storage(
+            &mut self,
+            address: Address,
+            index: U256,
+        ) -> Result<FlaggedStorage, Self::Error> {
+            Ok(self.inner.storage(address, index).unwrap())
+        }
+
+        fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+            self.block_hash_reads.push(number);
+            if self.fail_at == Some(number) {
+                return Err(FreshnessDbError(number));
+            }
+            Ok(B256::repeat_byte(number as u8))
+        }
+    }
+
+    fn assert_freshness_hash_read_outcome(
+        use_result_closure: bool,
+        inspected: bool,
+        fail_read: bool,
+    ) {
+        // At block 100 the parent is checked directly, then the scan first reads block 98.
+        // This anchor is valid when the database is healthy, not a genuinely stale hash.
+        let db = FreshnessDb { fail_at: fail_read.then_some(98), ..Default::default() };
+        let mut state = StateBuilder::new_with_database(db).build();
+        let setup = setup_test(&mut state);
+        let mut cfg = CfgEnv::new_with_spec(SeismicSpecId::MERCURY);
+        cfg.chain_id = 5124;
+        let mut evm = setup.evm_factory.create_evm(
+            &mut state,
+            EvmEnv::new(cfg, BlockEnv { number: U256::from(100), ..Default::default() }),
+        );
+        evm.set_inspector_enabled(inspected);
+        let mut executor = SeismicBlockExecutor::new(
+            evm,
+            setup.ctx.clone(),
+            SeismicChainHardforks::seismic_mainnet(),
+            SeismicAlloyReceiptBuilder::default(),
+        );
+        executor.apply_pre_execution_changes().unwrap();
+
+        let tx = sample_seismic_tx_with_elements(
+            &setup,
+            "historical anchor",
+            TxSeismicElements {
+                encryption_pubkey: setup.encryption_pubkey,
+                encryption_nonce: U96::from_be_slice(&setup.encryption_nonce.0),
+                message_version: 0,
+                recent_block_hash: B256::repeat_byte(98),
+                expires_at_block: 1000,
+                signed_read: false,
+            },
+        );
+        let envelope = get_tx_envelope(&setup, tx);
+        let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+        let mut executed_successfully = false;
+        let result = if use_result_closure {
+            executor
+                .execute_transaction_with_result_closure(recovered, |result| {
+                    executed_successfully = result.is_success();
+                })
+                .map(Some)
+        } else {
+            executor.execute_transaction_with_commit_condition(recovered, |result| {
+                executed_successfully = result.is_success();
+                CommitChanges::Yes
+            })
+        };
+        if !fail_read {
+            assert!(result.is_ok(), "the historical anchor must be valid: {result:?}");
+            assert!(executed_successfully, "the healthy control must execute successfully");
+            assert!(executor.evm().ctx().error.is_ok());
+            assert_eq!(
+                executor.evm().ctx().journaled_state.database.database.block_hash_reads,
+                vec![98],
+            );
+            return;
+        }
+
+        let error = result.expect_err("the historical hash read must fail");
+        assert!(
+            matches!(&error, BlockExecutionError::Internal(_)),
+            "a local DB failure must not invalidate the transaction: {error:?}; pending: {:?}",
+            executor.evm().ctx().error,
+        );
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "block hash lookup for block 98 failed while validating transaction {}: \
+                 injected freshness block-hash database error at block 98",
+                envelope.trie_hash(),
+            ),
+        );
+        let BlockExecutionError::Internal(internal) = &error else {
+            unreachable!("the error classification was checked above");
+        };
+        let lookup = internal.downcast_other::<BlockHashLookupError<FreshnessDbError>>().unwrap();
+        assert_eq!(lookup.number, 98);
+        assert_eq!(lookup.tx_hash, envelope.trie_hash());
+        let source =
+            core::error::Error::source(lookup).expect("the provider error must be preserved");
+        assert_eq!(source.downcast_ref::<FreshnessDbError>().unwrap().0, 98);
+        assert!(executor.evm().ctx().error.is_ok(), "the DB error must not remain pending");
+        assert_eq!(
+            executor.evm().ctx().journaled_state.database.database.block_hash_reads,
+            vec![98],
+            "the scan must stop at the first DB error",
+        );
+
+        // A parent-anchored tx makes no historical reads. It must not inherit the failed
+        // scan's error, and nonce 0 must remain usable because the failed tx never executed.
+        let retry = sample_seismic_tx(&setup, "parent anchor");
+        let envelope = get_tx_envelope(&setup, retry);
+        let recovered = Recovered::new_unchecked(&envelope, setup.signer);
+        let result = if use_result_closure {
+            executor.execute_transaction_with_result_closure(recovered, |_| {}).map(Some)
+        } else {
+            executor.execute_transaction_with_commit_condition(recovered, |_| CommitChanges::Yes)
+        };
+        assert!(result.is_ok(), "the next valid tx must not inherit the DB error: {result:?}");
+        assert!(executor.evm().ctx().error.is_ok());
+        assert_eq!(
+            executor.evm().ctx().journaled_state.database.database.block_hash_reads,
+            vec![98]
+        );
+    }
+
+    #[test]
+    fn test_freshness_db_error_commit_condition() {
+        assert_freshness_hash_read_outcome(false, false, true);
+    }
+
+    #[test]
+    fn test_freshness_db_error_result_closure() {
+        assert_freshness_hash_read_outcome(true, false, true);
+    }
+
+    #[test]
+    fn test_freshness_db_error_inspected_commit_condition() {
+        assert_freshness_hash_read_outcome(false, true, true);
+    }
+
+    #[test]
+    fn test_freshness_db_error_inspected_result_closure() {
+        assert_freshness_hash_read_outcome(true, true, true);
+    }
+
+    #[test]
+    fn test_freshness_historical_anchor_with_healthy_db() {
+        for use_result_closure in [false, true] {
+            for inspected in [false, true] {
+                assert_freshness_hash_read_outcome(use_result_closure, inspected, false);
+            }
+        }
     }
 
     #[test]
