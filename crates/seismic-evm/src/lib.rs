@@ -275,6 +275,7 @@ where
             tx_hash: Default::default(),
             decryption_failed: false,
             signed_read: false,
+            gas_payment: seismic_revm::GasPayment::Auto,
         };
 
         let mut gas_limit = tx.base.gas_limit;

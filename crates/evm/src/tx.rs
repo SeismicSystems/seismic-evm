@@ -18,6 +18,17 @@ use revm::{context::TxEnv, context_interface::either::Either};
 use seismic_alloy_consensus::{SeismicTxEnvelope, TxSeismic, SEISMIC_TX_TYPE_ID};
 use seismic_revm::SeismicTransaction;
 
+/// Preserve the authenticated consensus payment choice in the execution environment.
+pub const fn gas_payment_to_env(
+    payment: seismic_alloy_consensus::GasPayment,
+) -> seismic_revm::GasPayment {
+    match payment {
+        seismic_alloy_consensus::GasPayment::Auto => seismic_revm::GasPayment::Auto,
+        seismic_alloy_consensus::GasPayment::Native => seismic_revm::GasPayment::Native,
+        seismic_alloy_consensus::GasPayment::Token(token) => seismic_revm::GasPayment::Token(token),
+    }
+}
+
 /// Trait marking types that can be converted into a transaction environment.
 ///
 /// This is the primary trait that enables flexible transaction input for the EVM. The EVM's
@@ -585,14 +596,7 @@ mod op {
 
 impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_encoded_tx(tx: &SeismicTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
-        let tx_env = SeismicTransaction::<TxEnv>::from_recovered_tx(tx, sender);
-
-        Self {
-            base: tx_env.base,
-            tx_hash: tx_env.tx_hash,
-            decryption_failed: false,
-            signed_read: false,
-        }
+        Self::from_recovered_tx(tx, sender)
     }
 }
 
@@ -602,7 +606,7 @@ impl FromTxWithEncoded<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
 /// instead.
 impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
     fn from_recovered_tx(tx: &SeismicTxEnvelope, sender: Address) -> Self {
-        let tx_hash = tx.tx_hash().clone();
+        let tx_hash = tx.tx_hash();
         let base = match tx {
             SeismicTxEnvelope::Legacy(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
             SeismicTxEnvelope::Eip2930(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
@@ -611,15 +615,70 @@ impl FromRecoveredTx<SeismicTxEnvelope> for SeismicTransaction<TxEnv> {
             SeismicTxEnvelope::Eip7702(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
             SeismicTxEnvelope::Seismic(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
         };
-        SeismicTransaction { base, tx_hash, decryption_failed: false, signed_read: false }
+        let (gas_payment, signed_read) = match tx {
+            SeismicTxEnvelope::Seismic(tx) => {
+                (gas_payment_to_env(tx.tx().gas_payment), tx.tx().seismic_elements.signed_read)
+            }
+            _ => (seismic_revm::GasPayment::Auto, false),
+        };
+        Self { base, tx_hash, decryption_failed: false, signed_read, gas_payment }
+    }
+}
+
+impl FromRecoveredTx<TxSeismic> for SeismicTransaction<TxEnv> {
+    fn from_recovered_tx(tx: &TxSeismic, sender: Address) -> Self {
+        Self {
+            base: TxEnv::from_recovered_tx(tx, sender),
+            gas_payment: gas_payment_to_env(tx.gas_payment),
+            signed_read: tx.seismic_elements.signed_read,
+            ..Default::default()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::SignableTransaction;
     use alloy_eips::eip7702::Authorization;
     use alloy_primitives::{B256, U256};
+
+    #[test]
+    fn all_seismic_conversion_routes_preserve_payment_and_signed_read() {
+        use alloy_eips::Encodable2718;
+        use seismic_alloy_consensus::GasPayment;
+        let sender = Address::repeat_byte(0x11);
+        for gas_payment in
+            [GasPayment::Auto, GasPayment::Native, GasPayment::Token(Address::repeat_byte(0x77))]
+        {
+            let mut tx = TxSeismic { gas_payment, ..Default::default() };
+            tx.seismic_elements.signed_read = true;
+            let direct = SeismicTransaction::<TxEnv>::from_recovered_tx(&tx, sender);
+            assert_eq!(direct.gas_payment, gas_payment_to_env(gas_payment));
+            assert!(direct.signed_read);
+            let envelope = SeismicTxEnvelope::from(tx.into_signed(
+                alloy_primitives::Signature::new(U256::from(1), U256::from(2), false),
+            ));
+            let recovered = SeismicTransaction::<TxEnv>::from_recovered_tx(&envelope, sender);
+            let encoded = SeismicTransaction::<TxEnv>::from_encoded_tx(
+                &envelope,
+                sender,
+                envelope.encoded_2718().into(),
+            );
+            assert_eq!(recovered.gas_payment, direct.gas_payment);
+            assert_eq!(encoded.gas_payment, direct.gas_payment);
+            assert!(recovered.signed_read && encoded.signed_read);
+            assert_eq!(recovered.tx_hash, *envelope.tx_hash());
+            assert_eq!(encoded.tx_hash, recovered.tx_hash);
+        }
+        let envelope =
+            SeismicTxEnvelope::from(TxLegacy::default().into_signed(
+                alloy_primitives::Signature::new(U256::from(1), U256::from(2), false),
+            ));
+        let env = SeismicTransaction::<TxEnv>::from_recovered_tx(&envelope, sender);
+        assert_eq!(env.gas_payment, seismic_revm::GasPayment::Auto);
+        assert!(!env.signed_read);
+    }
 
     #[test]
     fn recovered_seismic_transaction_preserves_authorization_list() {
