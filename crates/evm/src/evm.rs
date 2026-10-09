@@ -7,7 +7,7 @@ use revm::{
     context::{result::ExecutionResult, BlockEnv},
     context_interface::{
         result::{HaltReasonTr, ResultAndState},
-        ContextTr,
+        Block, ContextTr,
     },
     inspector::{JournalExt, NoOpInspector},
     DatabaseCommit, Inspector,
@@ -53,12 +53,14 @@ pub trait Evm {
     /// Identifier of the EVM specification. EVM is expected to use this identifier to determine
     /// which features are enabled.
     type Spec: Debug + Copy + Hash + Eq + Send + Sync + Default + 'static;
+    /// Full block environment carried into and out of this EVM.
+    type BlockEnv: Block;
     /// Precompiles used by the EVM.
     type Precompiles;
     /// Evm inspector.
     type Inspector;
 
-    /// Reference to [`BlockEnv`].
+    /// Reference to the standard seconds-based portion of the block environment.
     fn block(&self) -> &BlockEnv;
 
     /// Returns the chain ID of the environment.
@@ -125,7 +127,7 @@ pub trait Evm {
     }
 
     /// Consumes the EVM and returns the inner [`EvmEnv`].
-    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>)
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec, Self::BlockEnv>)
     where
         Self: Sized;
 
@@ -138,7 +140,7 @@ pub trait Evm {
     }
 
     /// Consumes the EVM and returns the inner [`EvmEnv`].
-    fn into_env(self) -> EvmEnv<Self::Spec>
+    fn into_env(self) -> EvmEnv<Self::Spec, Self::BlockEnv>
     where
         Self: Sized,
     {
@@ -200,12 +202,13 @@ pub trait EvmFactory {
         HaltReason = Self::HaltReason,
         Error = Self::Error<DB::Error>,
         Spec = Self::Spec,
+        BlockEnv = Self::BlockEnv,
         Precompiles = Self::Precompiles<DB>,
         Inspector = I,
     >;
 
     /// The EVM context for inspectors
-    type Context<DB: Database>: ContextTr<Db = DB, Journal: JournalExt>;
+    type Context<DB: Database>: ContextTr<Db = DB, Block = Self::BlockEnv, Journal: JournalExt>;
     /// Transaction environment.
     type Tx: IntoTxEnv<Self::Tx>;
     /// EVM error. See [`Evm::Error`].
@@ -214,6 +217,8 @@ pub trait EvmFactory {
     type HaltReason: HaltReasonTr + Send + Sync + 'static;
     /// The EVM specification identifier, see [`Evm::Spec`].
     type Spec: Debug + Copy + Hash + Eq + Send + Sync + Default + 'static;
+    /// Full block environment accepted by this factory.
+    type BlockEnv: Block;
     /// Precompiles used by the EVM.
     type Precompiles<DB: Database>;
 
@@ -221,7 +226,7 @@ pub trait EvmFactory {
     fn create_evm<DB: Database>(
         &self,
         db: DB,
-        evm_env: EvmEnv<Self::Spec>,
+        evm_env: EvmEnv<Self::Spec, Self::BlockEnv>,
     ) -> Self::Evm<DB, NoOpInspector>;
 
     /// Creates a new instance of an EVM with an inspector.
@@ -231,7 +236,7 @@ pub trait EvmFactory {
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
         &self,
         db: DB,
-        input: EvmEnv<Self::Spec>,
+        input: EvmEnv<Self::Spec, Self::BlockEnv>,
         inspector: I,
     ) -> Self::Evm<DB, I>;
 }
@@ -242,7 +247,7 @@ pub trait EvmFactoryExt: EvmFactory {
     fn create_tracer<DB, I>(
         &self,
         db: DB,
-        input: EvmEnv<Self::Spec>,
+        input: EvmEnv<Self::Spec, Self::BlockEnv>,
         fused_inspector: I,
     ) -> TxTracer<Self::Evm<DB, I>>
     where

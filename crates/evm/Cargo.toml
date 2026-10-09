@@ -57,4 +57,3 @@ std = [
 ]
 op = ["op-revm", "op-alloy-consensus"]
 call-util = []
-timestamp-in-seconds = ["revm/timestamp-in-seconds", "seismic-revm/timestamp-in-seconds"]

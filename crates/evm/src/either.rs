@@ -11,6 +11,7 @@ where
         Error = L::Error,
         HaltReason = L::HaltReason,
         Spec = L::Spec,
+        BlockEnv = L::BlockEnv,
         Precompiles = L::Precompiles,
         Inspector = L::Inspector,
     >,
@@ -20,6 +21,7 @@ where
     type Error = L::Error;
     type HaltReason = L::HaltReason;
     type Spec = L::Spec;
+    type BlockEnv = L::BlockEnv;
     type Precompiles = L::Precompiles;
     type Inspector = L::Inspector;
 
@@ -64,7 +66,7 @@ where
         either::for_both!(self, evm => evm.transact_commit(tx))
     }
 
-    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>)
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec, Self::BlockEnv>)
     where
         Self: Sized,
     {
@@ -78,7 +80,7 @@ where
         either::for_both!(self, evm => evm.into_db())
     }
 
-    fn into_env(self) -> EvmEnv<Self::Spec>
+    fn into_env(self) -> EvmEnv<Self::Spec, Self::BlockEnv>
     where
         Self: Sized,
     {
