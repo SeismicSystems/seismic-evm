@@ -12,10 +12,7 @@ use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::ops::{Deref, DerefMut};
 use revm::{
     context::{result::InvalidTransaction, BlockEnv, TxEnv},
-    context_interface::{
-        result::{EVMError, HaltReason, ResultAndState},
-        ContextTr,
-    },
+    context_interface::result::{EVMError, HaltReason, ResultAndState},
     database_interface::EmptyDB,
     handler::PrecompileProvider,
     inspector::NoOpInspector,
@@ -27,6 +24,11 @@ use seismic_revm::{
     transaction::abstraction::SeismicTransaction, DefaultSeismicContext, SeismicBuilder,
     SeismicContext, SeismicSpecId,
 };
+
+pub use seismic_revm::SeismicBlockEnv;
+
+/// Seismic execution environment, including the sub-second timestamp component.
+pub type SeismicEvmEnv = EvmEnv<SeismicSpecId, SeismicBlockEnv>;
 
 pub mod block;
 pub mod hardfork;
@@ -211,6 +213,7 @@ where
     type Error = EVMError<DB::Error>;
     type HaltReason = HaltReason;
     type Spec = SeismicSpecId;
+    type BlockEnv = SeismicBlockEnv;
     type Precompiles = P;
     type Inspector = I;
 
@@ -219,7 +222,7 @@ where
     }
 
     fn block(&self) -> &BlockEnv {
-        self.inner.0.block()
+        &self.inner.0.ctx.block.inner
     }
 
     fn transact_raw(
@@ -315,7 +318,7 @@ where
         &mut self.journaled_state.database
     }
 
-    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec, Self::BlockEnv>) {
         let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
@@ -379,7 +382,7 @@ impl SeismicEvmFactory {
     pub fn create_evm_with_rng_key<DB: Database>(
         &self,
         db: DB,
-        input: EvmEnv<SeismicSpecId>,
+        input: SeismicEvmEnv,
     ) -> SeismicEvm<DB, NoOpInspector> {
         let context = self.uninitialized_context();
 
@@ -406,7 +409,7 @@ impl SeismicEvmFactory {
     pub fn create_evm_with_inspector_and_rng_key<DB: Database, I: Inspector<SeismicContext<DB>>>(
         &self,
         db: DB,
-        input: EvmEnv<SeismicSpecId>,
+        input: SeismicEvmEnv,
         inspector: I,
     ) -> SeismicEvm<DB, I> {
         let context = self.uninitialized_context();
@@ -432,12 +435,13 @@ impl EvmFactory for SeismicEvmFactory {
         EVMError<DBError, InvalidTransaction>;
     type HaltReason = HaltReason;
     type Spec = SeismicSpecId;
+    type BlockEnv = SeismicBlockEnv;
     type Precompiles<DB: Database> = SeismicPrecompiles<Self::Context<DB>>;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
-        input: EvmEnv<SeismicSpecId>,
+        input: SeismicEvmEnv,
     ) -> Self::Evm<DB, NoOpInspector> {
         self.create_evm_with_rng_key(db, input)
     }
@@ -445,7 +449,7 @@ impl EvmFactory for SeismicEvmFactory {
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
         &self,
         db: DB,
-        input: EvmEnv<SeismicSpecId>,
+        input: SeismicEvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
         self.create_evm_with_inspector_and_rng_key(db, input, inspector)

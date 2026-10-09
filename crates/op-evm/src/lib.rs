@@ -94,6 +94,7 @@ where
     type Error = EVMError<DB::Error, OpTransactionError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles = P;
     type Inspector = I;
 
@@ -165,6 +166,7 @@ impl EvmFactory for OpEvmFactory {
         EVMError<DBError, OpTransactionError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles<DB: Database> = PrecompilesMap;
 
     fn create_evm<DB: Database>(

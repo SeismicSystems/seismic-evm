@@ -536,7 +536,7 @@ mod tests {
                         &mut state,
                         EvmEnv::new(
                             cfg,
-                            BlockEnv { number: U256::from(100), ..Default::default() },
+                            BlockEnv { number: U256::from(100), ..Default::default() }.into(),
                         ),
                     );
                     evm.set_inspector_enabled(inspected);
@@ -613,7 +613,7 @@ mod tests {
                         &mut state,
                         EvmEnv::new(
                             cfg,
-                            BlockEnv { number: U256::from(100), ..Default::default() },
+                            BlockEnv { number: U256::from(100), ..Default::default() }.into(),
                         ),
                     );
                     evm.set_inspector_enabled(inspected);
@@ -673,7 +673,10 @@ mod tests {
             let setup = setup_test(&mut state);
             let mut evm = setup.evm_factory.create_evm(
                 &mut state,
-                EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+                EvmEnv::new(
+                    CfgEnv::new_with_spec(SeismicSpecId::MERCURY),
+                    BlockEnv::default().into(),
+                ),
             );
             evm.set_inspector_enabled(inspected);
             let factory = setup.executor_factory.clone().with_plaintext_signed_reads();
@@ -905,7 +908,7 @@ mod tests {
         cfg.chain_id = 5124;
         let mut evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(cfg, BlockEnv { number: U256::from(100), ..Default::default() }),
+            EvmEnv::new(cfg, BlockEnv { number: U256::from(100), ..Default::default() }.into()),
         );
         evm.set_inspector_enabled(inspected);
         let mut executor = SeismicBlockExecutor::new(
@@ -1143,7 +1146,10 @@ mod tests {
                 cfg.chain_id = 5124;
                 let evm = setup.evm_factory.create_evm(
                     &mut state,
-                    EvmEnv::new(cfg, BlockEnv { number: U256::from(100), ..Default::default() }),
+                    EvmEnv::new(
+                        cfg,
+                        BlockEnv { number: U256::from(100), ..Default::default() }.into(),
+                    ),
                 );
                 let mut executor = SeismicBlockExecutor::new(
                     evm,
@@ -1231,7 +1237,7 @@ mod tests {
             let setup = setup_test(&mut state);
             let env = EvmEnv::new(
                 CfgEnv::new_with_spec(SeismicSpecId::MERCURY),
-                BlockEnv { number: U256::from(100), ..Default::default() },
+                BlockEnv { number: U256::from(100), ..Default::default() }.into(),
             );
             let evm = setup.evm_factory.create_evm(&mut state, env);
             let mut ctx = setup.ctx.clone();
@@ -1284,7 +1290,7 @@ mod tests {
         let setup = setup_test(&mut state);
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default().into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         let envelope = get_tx_envelope(&setup, sample_seismic_tx(&setup, "must not execute"));
@@ -1311,7 +1317,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default().into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1337,7 +1343,7 @@ mod tests {
         block_env.number = U256::from(100);
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env.into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1376,7 +1382,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default().into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1409,7 +1415,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default().into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1441,7 +1447,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default().into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1483,7 +1489,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env.into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1518,7 +1524,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env.into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1561,7 +1567,7 @@ mod tests {
         block_env.number = U256::from(100);
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env.into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         let result = executor.apply_pre_execution_changes();
@@ -1592,7 +1598,7 @@ mod tests {
         block_env.number = U256::from(100);
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env.into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1622,7 +1628,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default().into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1657,7 +1663,7 @@ mod tests {
 
         let evm = setup.evm_factory.create_evm(
             &mut state,
-            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env),
+            EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), block_env.into()),
         );
         let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
         executor.apply_pre_execution_changes().unwrap();
@@ -1694,7 +1700,10 @@ mod tests {
             let evm_factory = SeismicEvmFactory::new(keyring);
             let mut evm = evm_factory.create_evm(
                 &mut state,
-                EvmEnv::new(CfgEnv::new_with_spec(SeismicSpecId::MERCURY), BlockEnv::default()),
+                EvmEnv::new(
+                    CfgEnv::new_with_spec(SeismicSpecId::MERCURY),
+                    BlockEnv::default().into(),
+                ),
             );
 
             let tx = SeismicTransaction {

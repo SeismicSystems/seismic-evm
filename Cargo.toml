@@ -87,6 +87,6 @@ alloy-sol-type-parser = { git = "https://github.com/SeismicSystems/seismic-alloy
 seismic-alloy-consensus = { git = "https://github.com/SeismicSystems/seismic-alloy.git", rev = "3648503c34393868b8f7029bf4fca335d4c0dffd" }
 
 # revm
-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "338d526303ed966cdef1d5cf7fd52933d54ec21a" }
-op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "338d526303ed966cdef1d5cf7fd52933d54ec21a" }
-seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "338d526303ed966cdef1d5cf7fd52933d54ec21a" }
+revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "08a068926f3c07225adfc80fae569ee75f5ee3c6" }
+op-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "08a068926f3c07225adfc80fae569ee75f5ee3c6" }
+seismic-revm = { git = "https://github.com/SeismicSystems/seismic-revm.git", rev = "08a068926f3c07225adfc80fae569ee75f5ee3c6" }

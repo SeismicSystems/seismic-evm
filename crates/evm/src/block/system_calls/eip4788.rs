@@ -25,13 +25,7 @@ pub(crate) fn transact_beacon_root_contract_call<Halt>(
     parent_beacon_block_root: Option<B256>,
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    // EVM block timestamp is in milliseconds when timestamp-in-seconds feature is disabled
-    // Fork activation checks always use seconds
-    let timestamp_seconds = if cfg!(feature = "timestamp-in-seconds") {
-        evm.block().timestamp.saturating_to()
-    } else {
-        evm.block().timestamp.saturating_to::<u64>() / 1000
-    };
+    let timestamp_seconds = evm.block().timestamp.saturating_to();
 
     if !spec.is_cancun_active_at_timestamp(timestamp_seconds) {
         return Ok(None);

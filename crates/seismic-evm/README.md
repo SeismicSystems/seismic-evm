@@ -2,6 +2,37 @@
 
 `alloy-seismic-evm` adapts Seismic transactions and block execution to the Mercury EVM. It selects purpose keys from the parent-state key-rotation registry and decrypts transaction inputs before delegating to the Ethereum block executor.
 
+## Block timestamps
+
+Seismic factories accept `SeismicEvmEnv`, an alias for
+`EvmEnv<SeismicSpecId, SeismicBlockEnv>`. The standard `BlockEnv` inside it uses
+Unix seconds; `timestamp_millis_part` carries the sub-second component.
+
+```rust
+use alloy_primitives::U256;
+use alloy_seismic_evm::SeismicEvmEnv;
+
+let mut env = SeismicEvmEnv::default();
+env.block_env.timestamp = U256::from(1_800_000_000u64);
+env.block_env.timestamp_millis_part = 123;
+assert_eq!(env.block_env.timestamp_millis(), U256::from(1_800_000_000_123u64));
+```
+
+Normal execution, inspected execution, system calls and `Evm::finish()` preserve
+the component. `Evm::block()` exposes the standard seconds-based inner environment
+for common block-execution logic. `TIMESTAMP` remains seconds, while Seismic's
+`TIMESTAMPMS` (`0x4B`) returns `seconds * 1000 + timestamp_millis_part`.
+
+Fork checks for Cancun/Prague and standard block timestamps always use seconds;
+the `timestamp-in-seconds` features have been removed. Seismic's beacon-roots
+contract still indexes entries in full milliseconds.
+
+Execution clients must populate the component from both existing headers and
+next-block attributes and validate that it is in `0..1000`. Converting a standard
+`BlockEnv` with `.into()` assigns a zero component, not recovered precision.
+Mutate Seismic environment fields directly as above; `EvmEnv`'s standard
+`BlockEnv` convenience setters remain available for Ethereum/OP environments.
+
 ## Gas-payment metadata
 
 The shared `alloy-evm::tx::gas_payment_to_env` conversion preserves the authenticated consensus selector in the execution environment:
