@@ -253,7 +253,7 @@ where
         // this selection so system calls and raw transaction execution agree.
         self.selected = None;
         let selected = self.evm_mut().initialize_block_keys()?;
-        self.evm_mut().seismic_chain_mut().set_rng_key(selected.keys.rng_ikm);
+        self.evm_mut().seismic_chain_mut().set_rng_key(selected.keys.rng_ikm.clone());
         let parent_hash = self.inner.ctx.parent_hash;
         self.evm_mut().seismic_chain_mut().set_parent_block_hash(parent_hash);
         self.inner.apply_pre_execution_changes()?;
@@ -1252,7 +1252,7 @@ mod tests {
                         1,
                         PurposeKeys {
                             tx_io: secp256k1::Keypair::from_secret_key(&Secp256k1::new(), &sk),
-                            rng_ikm: [42; 64],
+                            rng_ikm: seismic_crypto::RngIkm::from_bytes([42; 64]),
                         },
                     )
                     .unwrap();
@@ -1591,7 +1591,13 @@ mod tests {
         let epoch1_tx_io = secp256k1::Keypair::from_secret_key(&Secp256k1::new(), &epoch1_sk);
         setup
             .keyring
-            .insert_epoch(1, PurposeKeys { tx_io: epoch1_tx_io, rng_ikm: [7u8; 64] })
+            .insert_epoch(
+                1,
+                PurposeKeys {
+                    tx_io: epoch1_tx_io,
+                    rng_ikm: seismic_crypto::RngIkm::from_bytes([7u8; 64]),
+                },
+            )
             .unwrap();
 
         let mut block_env = BlockEnv::default();

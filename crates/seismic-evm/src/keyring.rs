@@ -387,7 +387,7 @@ impl PurposeKeyring {
         }
         let mut state = self.write();
         match state.keys.get(&epoch) {
-            Some(existing) if keys_equal(existing, &keys) => Ok(false),
+            Some(existing) if *existing == keys => Ok(false),
             Some(_) => Err(EpochKeyConflict { epoch }.into()),
             None => {
                 state.keys.insert(epoch, keys);
@@ -484,11 +484,6 @@ impl PurposeKeyring {
     }
 }
 
-/// Field-wise equality; [`PurposeKeys`] does not derive `PartialEq` itself.
-fn keys_equal(a: &PurposeKeys, b: &PurposeKeys) -> bool {
-    a.tx_io == b.tx_io && a.rng_ikm == b.rng_ikm
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,11 +501,11 @@ mod tests {
         live.insert_epoch(1, test_keys(2)).unwrap();
         let snapshot = live.snapshot();
         assert_eq!(snapshot.canonical_view(), CanonicalRotationView::default());
-        assert!(keys_equal(&snapshot.keys_for_epoch(1).unwrap(), &live.keys_for_epoch(1).unwrap()));
+        assert_eq!(snapshot.keys_for_epoch(1).unwrap(), live.keys_for_epoch(1).unwrap());
         assert!(snapshot.select_epoch(2, 200).is_err());
         assert!(live.requested_epochs().is_empty());
         live.insert_epoch(2, test_keys(3)).unwrap();
-        assert_eq!(snapshot.select_epoch(2, 200).unwrap().keys.rng_ikm, [3; 64]);
+        assert_eq!(snapshot.select_epoch(2, 200).unwrap().keys.rng_ikm.as_bytes(), &[3; 64]);
         assert_eq!(snapshot.canonical_view(), CanonicalRotationView::default());
     }
 
@@ -524,7 +519,7 @@ mod tests {
             for (epoch, keys) in [(0, test_keys(1)), (0, test_keys(2)), (1, test_keys(2))] {
                 assert_eq!(simulation.insert_epoch(epoch, keys), Err(InsertEpochError::Simulation));
             }
-            assert!(keys_equal(&live.keys_for_epoch(0).unwrap(), &test_keys(1)));
+            assert_eq!(live.keys_for_epoch(0).unwrap(), test_keys(1));
             assert!(live.keys_for_epoch(1).is_none());
             assert_eq!(live.requested_epochs(), vec![1]);
         }
@@ -532,7 +527,7 @@ mod tests {
         let simulation = live.snapshot();
         live.insert_epoch(1, test_keys(2)).unwrap();
         assert!(live.requested_epochs().is_empty());
-        assert!(keys_equal(&simulation.select_epoch(1, 100).unwrap().keys, &test_keys(2)));
+        assert_eq!(simulation.select_epoch(1, 100).unwrap().keys, test_keys(2));
     }
 
     fn view(head_number: u64) -> CanonicalRotationView {
@@ -546,7 +541,7 @@ mod tests {
     fn test_keys(seed: u8) -> PurposeKeys {
         let sk = SecretKey::from_byte_array(&[seed; 32]).unwrap();
         let tx_io = secp256k1::Keypair::from_secret_key(&Secp256k1::new(), &sk);
-        PurposeKeys { tx_io, rng_ikm: [seed; 64] }
+        PurposeKeys { tx_io, rng_ikm: seismic_crypto::RngIkm::from_bytes([seed; 64]) }
     }
 
     fn schedule(entries: &[(u64, u64, u64)]) -> RotationSchedule {
@@ -635,10 +630,10 @@ mod tests {
     fn single_epoch_keyring_serves_epoch_zero_everywhere() {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
         assert_eq!(keyring.epoch_for_block(u64::MAX), 0);
-        assert_eq!(keyring.select_epoch(0, 12345).unwrap().keys.rng_ikm, [1; 64]);
+        assert_eq!(keyring.select_epoch(0, 12345).unwrap().keys.rng_ikm.as_bytes(), &[1; 64]);
         let (epoch, keys) = keyring.current().unwrap();
         assert_eq!(epoch, 0);
-        assert_eq!(keys.rng_ikm, [1; 64]);
+        assert_eq!(keys.rng_ikm.as_bytes(), &[1; 64]);
         assert_eq!(keyring.pending(), None);
         assert!(keyring.unfetched_scheduled_epochs().is_empty());
     }
@@ -647,7 +642,7 @@ mod tests {
     fn missing_epoch_is_a_hard_error_until_fetched() {
         let keyring = PurposeKeyring::single_epoch(test_keys(1));
         keyring.replace_canonical_view(view(99));
-        assert_eq!(keyring.select_epoch(0, 99).unwrap().keys.rng_ikm, [1; 64]);
+        assert_eq!(keyring.select_epoch(0, 99).unwrap().keys.rng_ikm.as_bytes(), &[1; 64]);
         assert_eq!(
             keyring.select_epoch(1, 100).map(|_| ()),
             Err(MissingEpochKeys { epoch: 1, block: 100 })
@@ -655,7 +650,7 @@ mod tests {
         assert_eq!(keyring.unfetched_scheduled_epochs(), vec![1]);
 
         assert!(keyring.insert_epoch(1, test_keys(2)).unwrap());
-        assert_eq!(keyring.select_epoch(1, 100).unwrap().keys.rng_ikm, [2; 64]);
+        assert_eq!(keyring.select_epoch(1, 100).unwrap().keys.rng_ikm.as_bytes(), &[2; 64]);
         assert!(keyring.unfetched_scheduled_epochs().is_empty());
     }
 
@@ -668,7 +663,7 @@ mod tests {
             keyring.insert_epoch(1, test_keys(3)),
             Err(InsertEpochError::Conflict(EpochKeyConflict { epoch: 1 }))
         );
-        assert_eq!(keyring.keys_for_epoch(1).unwrap().rng_ikm, [2; 64]);
+        assert_eq!(keyring.keys_for_epoch(1).unwrap().rng_ikm.as_bytes(), &[2; 64]);
     }
 
     #[test]

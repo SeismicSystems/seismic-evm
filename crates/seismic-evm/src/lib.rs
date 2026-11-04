@@ -45,7 +45,7 @@ pub use secp256k1;
 /// custodian (TEE networks) or from the well-known keys (networks with no root
 /// key) and threads them into the EVM factories through an epoch-keyed
 /// [`PurposeKeyring`].
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PurposeKeys {
     /// The network's tx-io keypair: wallets ECDH against the public half to
     /// encrypt calldata, the node decrypts with the secret half. Held as one
@@ -53,7 +53,7 @@ pub struct PurposeKeys {
     pub tx_io: secp256k1::Keypair,
     /// HKDF ikm seeding the RNG precompile. Opaque key material: the
     /// precompile feeds it to HKDF on every call and never interprets it.
-    pub rng_ikm: [u8; 64],
+    pub rng_ikm: seismic_crypto::RngIkm,
 }
 
 impl PurposeKeys {
@@ -138,7 +138,7 @@ impl<DB: Database, I, P> SeismicEvm<DB, I, P> {
                         .map_err(KeySelectionError::Missing)
                 });
             if let Ok(selected) = &selection {
-                self.inner.0.ctx.chain.set_rng_key(selected.keys.rng_ikm);
+                self.inner.0.ctx.chain.set_rng_key(selected.keys.rng_ikm.clone());
             }
             self.selection = Some(selection);
         }
@@ -401,7 +401,7 @@ impl SeismicEvmFactory {
     // This placeholder is never used by transaction execution: initialize_keys
     // must succeed first, replacing it with the parent-state-selected key.
     fn uninitialized_context(&self) -> SeismicContext<EmptyDB> {
-        SeismicContext::seismic_with_rng_key([0; 64])
+        SeismicContext::seismic_with_rng_key(seismic_crypto::RngIkm::from_bytes([0; 64]))
     }
 
     /// Create an EVM with inspector using the keyring's RNG ikm for the block in
