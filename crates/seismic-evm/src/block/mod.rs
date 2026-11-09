@@ -142,6 +142,12 @@ where
         // Zero value so revm's validation doesn't require the sender to cover
         // a transfer amount that will never happen (execution is skipped).
         tx.base.value = U256::ZERO;
+        // Same principle for the authorization list: revm applies it in
+        // pre_execution, before the decryption-failed short-circuit in
+        // execution(), so leaving it intact would delegate the authority (and
+        // consume its nonce) for a transaction whose intent was never
+        // recovered. A failed-decryption tx must not delegate anyone.
+        tx.base.authorization_list = Default::default();
         tx
     }
 }
@@ -440,6 +446,7 @@ mod tests {
     use super::*;
     use crate::{CanonicalRotationView, PurposeKeys, RotationEntry, RotationSchedule};
     use alloy_consensus::SignableTransaction;
+    use alloy_eips::eip7702::{Authorization, SignedAuthorization};
     use alloy_evm::EvmEnv;
     use alloy_primitives::{
         aliases::U96, keccak256, Bytes, FlaggedStorage, Signature, TxKind, B256, U256,
@@ -486,12 +493,27 @@ mod tests {
     }
 
     #[test]
-    fn decryption_failure_changes_only_execution_value_and_failure_flag() {
+    fn decryption_failure_changes_only_execution_value_failure_flag_and_authorization_list() {
+        use alloy_eips::eip7702::Authorization;
         use seismic_alloy_consensus::GasPayment;
         for gas_payment in
             [GasPayment::Auto, GasPayment::Native, GasPayment::Token(Address::repeat_byte(0x77))]
         {
-            let original = TxSeismic { value: U256::from(123), gas_payment, ..Default::default() };
+            let authorization = Authorization {
+                chain_id: U256::from(5124),
+                address: Address::repeat_byte(0xAA),
+                nonce: 0,
+            };
+            let original = TxSeismic {
+                value: U256::from(123),
+                gas_payment,
+                authorization_list: vec![authorization.clone().into_signed(Signature::new(
+                    U256::from(1),
+                    U256::from(2),
+                    false,
+                ))],
+                ..Default::default()
+            };
             let signed =
                 original.clone().into_signed(Signature::new(U256::from(1), U256::from(2), false));
             let envelope = SeismicTxEnvelope::from(signed);
@@ -502,9 +524,17 @@ mod tests {
             let mut expected: SeismicTransaction<TxEnv> = wrapper.0.to_tx_env();
             expected.decryption_failed = true;
             expected.base.value = U256::ZERO;
-            assert_eq!(env, expected, "only execution value and the failure flag may change");
+            expected.base.authorization_list = Default::default();
+            assert_eq!(
+                env, expected,
+                "only execution value, the failure flag, and the authorization list may change"
+            );
             assert!(env.decryption_failed);
             assert_eq!(env.base.value, U256::ZERO);
+            assert!(
+                env.base.authorization_list.is_empty(),
+                "a decryption-failed tx must not carry an authorization list into execution"
+            );
             assert_eq!(env.gas_payment, alloy_evm::tx::gas_payment_to_env(gas_payment));
             assert_eq!(env.tx_hash, hash);
             assert_eq!(*wrapper.0.inner().tx_hash(), hash);
@@ -1434,6 +1464,129 @@ mod tests {
         assert_eq!(block_result.receipts.len(), 1, "should produce exactly one receipt");
         assert!(block_result.gas_used > 0, "block gas_used should reflect charged gas");
         assert!(!block_result.receipts[0].status(), "receipt should have failed status (status=0)");
+    }
+
+    fn sign_authorization(auth: &Authorization, signing_key: &SigningKey) -> SignedAuthorization {
+        let (sig, recoverid) = signing_key
+            .clone()
+            .sign_prehash_recoverable(auth.signature_hash().as_slice())
+            .expect("Failed to sign authorization");
+        auth.clone().into_signed(Signature::new(
+            U256::from_be_slice(&sig.r().to_bytes()),
+            U256::from_be_slice(&sig.s().to_bytes()),
+            recoverid.is_y_odd(),
+        ))
+    }
+
+    /// REPRO (hunt): a Seismic tx whose ciphertext fails to decrypt still applies
+    /// its EIP-7702 authorization list. The receipt is failed and no bytecode
+    /// executes, yet the authority ends up delegated (`0xef0100 || delegate`)
+    /// with its nonce consumed. `DecryptionFailed` zeroes the value on the
+    /// "will never happen" principle but leaves the authorization list intact,
+    /// and revm applies it in `pre_execution`, before the decryption-failed
+    /// short-circuit in `execution()`. This test asserts the fixed behaviour:
+    /// a decryption-failed tx must not delegate anyone.
+    #[test]
+    fn decryption_failed_tx_must_not_apply_eip7702_authorization() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+        let setup = setup_test(&mut state);
+
+        let mut cfg = CfgEnv::new_with_spec(SeismicSpecId::MERCURY);
+        cfg.chain_id = 5124;
+        let evm =
+            setup.evm_factory.create_evm(&mut state, EvmEnv::new(cfg, BlockEnv::default().into()));
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
+
+        // Authority: fresh key, empty code, nonce 0. Delegation target is arbitrary.
+        let rng = &mut rand::thread_rng();
+        let authority_key = SigningKey::random(rng);
+        let authority = public_key_to_address(*authority_key.verifying_key());
+        let delegate_to = Address::repeat_byte(0xAA);
+        let signed_authorization = sign_authorization(
+            &Authorization { chain_id: U256::from(5124), address: delegate_to, nonce: 0 },
+            &authority_key,
+        );
+        assert_eq!(signed_authorization.recover_authority().unwrap(), authority);
+
+        // Corrupt the ciphertext so decryption fails.
+        let mut tx_seismic = sample_seismic_tx(&setup, "delegation attempt");
+        tx_seismic.authorization_list = vec![signed_authorization];
+        let wrong_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &SecretKey::new(rng));
+        tx_seismic.seismic_elements.encryption_pubkey = wrong_pubkey;
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+        executor.execute_transaction(recovered).expect("decryption failure is metered, not fatal");
+
+        let (mut evm, block_result) = executor.finish().expect("finish should succeed");
+        assert_eq!(block_result.receipts.len(), 1);
+        assert!(
+            !block_result.receipts[0].status(),
+            "decryption-failed tx must have a failed receipt"
+        );
+
+        let info = evm
+            .db_mut()
+            .basic(authority)
+            .expect("authority account read must succeed")
+            .unwrap_or_default();
+        assert_eq!(info.nonce, 0, "decryption-failed tx must not consume the authority nonce");
+        assert_eq!(
+            info.code_hash,
+            keccak256(Bytes::new()),
+            "decryption-failed tx must not delegate the authority"
+        );
+    }
+
+    /// Control for the repro above: the same authorization on a tx that
+    /// decrypts fine DOES delegate, so the machinery (not the test) is what
+    /// the fix must preserve.
+    #[test]
+    fn decryption_success_tx_applies_eip7702_authorization() {
+        let db = InMemoryDB::default();
+        let mut state = StateBuilder::new_with_database(db).build();
+        let setup = setup_test(&mut state);
+
+        let mut cfg = CfgEnv::new_with_spec(SeismicSpecId::MERCURY);
+        cfg.chain_id = 5124;
+        let evm =
+            setup.evm_factory.create_evm(&mut state, EvmEnv::new(cfg, BlockEnv::default().into()));
+        let mut executor = setup.executor_factory.create_executor(evm, setup.ctx.clone());
+        executor.apply_pre_execution_changes().unwrap();
+
+        let rng = &mut rand::thread_rng();
+        let authority_key = SigningKey::random(rng);
+        let authority = public_key_to_address(*authority_key.verifying_key());
+        let delegate_to = Address::repeat_byte(0xAA);
+        let signed_authorization = sign_authorization(
+            &Authorization { chain_id: U256::from(5124), address: delegate_to, nonce: 0 },
+            &authority_key,
+        );
+        assert_eq!(signed_authorization.recover_authority().unwrap(), authority);
+
+        let mut tx_seismic = sample_seismic_tx(&setup, "delegation attempt");
+        tx_seismic.authorization_list = vec![signed_authorization];
+        let tx_envelope = get_tx_envelope(&setup, tx_seismic);
+        let recovered = Recovered::new_unchecked(&tx_envelope, setup.signer);
+        executor.execute_transaction(recovered).expect("valid tx must execute");
+
+        let (mut evm, block_result) = executor.finish().expect("finish should succeed");
+        assert!(block_result.receipts[0].status(), "valid tx must succeed");
+
+        let mut delegation_code = vec![0xef, 0x01, 0x00];
+        delegation_code.extend_from_slice(delegate_to.as_slice());
+        let info = evm
+            .db_mut()
+            .basic(authority)
+            .expect("authority account read must succeed")
+            .unwrap_or_default();
+        assert_eq!(info.nonce, 1, "successful tx must consume the authority nonce");
+        assert_eq!(
+            info.code_hash,
+            keccak256(&delegation_code),
+            "successful tx must delegate the authority"
+        );
     }
 
     /// Block execution continues after a decryption failure — subsequent valid
